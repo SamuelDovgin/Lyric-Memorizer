@@ -114,3 +114,44 @@ test("a saved position outside the phrase resumes at its entrance", () => {
   render(<PlayerPage {...props} resumeFocus openRequest={1}/>);
   expect(mock.transport.play).toHaveBeenLastCalledWith(6);
 });
+
+const longSong: Song = {...song, lines: Array.from({length: 5}, (_, i) => ({...song.lines[0], id: `long${i}`, index: i, text: `Long lyric ${i}`, start: i * 3, end: i * 3 + 2}))};
+function openPractice() {
+  HTMLDialogElement.prototype.showModal = function() { this.setAttribute("open", ""); };
+  HTMLDialogElement.prototype.close = vi.fn();
+  fireEvent.click(screen.getByRole("button", {name: "Practice"}));
+}
+test("two-line chunks loop on line boundaries, navigate, and stop at the final chunk", () => {
+  mock.state.status = "playing";
+  render(<PlayerPage {...props} song={longSong}/>);
+  openPractice();
+  fireEvent.click(screen.getByRole("button", {name: "2 lines at a time"}));
+  expect(mock.transport.setTransition).toHaveBeenLastCalledWith(expect.objectContaining({start: 0, exit: 5}));
+  expect(screen.getByRole("button", {name: "Previous practice chunk"})).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", {name: "Next practice chunk"}));
+  expect(mock.transport.seek).toHaveBeenLastCalledWith(6);
+  expect(mock.transport.setTransition).toHaveBeenLastCalledWith(expect.objectContaining({start: 6, exit: 11}));
+  fireEvent.click(screen.getByRole("button", {name: "Next practice chunk"}));
+  expect(mock.transport.setTransition).toHaveBeenLastCalledWith(expect.objectContaining({start: 12, exit: 14}));
+  expect(screen.getByRole("button", {name: "Next practice chunk"})).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", {name: "Previous practice chunk"}));
+  expect(mock.transport.seek).toHaveBeenLastCalledWith(6);
+  openPractice();
+  fireEvent.click(screen.getByRole("button", {name: "Stop practicing"}));
+  expect(mock.transport.setTransition).toHaveBeenLastCalledWith(null);
+});
+test("odd verse halves divide without overlap and resume the saved range", () => {
+  mock.state.status = "playing";
+  const view = render(<PlayerPage {...props} song={longSong}/>);
+  openPractice();
+  fireEvent.click(screen.getByRole("button", {name: "First half"}));
+  expect(mock.transport.setTransition).toHaveBeenLastCalledWith(expect.objectContaining({start: 0, exit: 8}));
+  openPractice();
+  fireEvent.click(screen.getByRole("button", {name: "Second half"}));
+  expect(mock.transport.setTransition).toHaveBeenLastCalledWith(expect.objectContaining({start: 9, exit: 14}));
+  mock.state.position = 10;
+  view.unmount();
+  render(<PlayerPage {...props} song={longSong} resumeFocus openRequest={1}/>);
+  expect(mock.transport.play).toHaveBeenLastCalledWith(10);
+  expect(mock.transport.setTransition).toHaveBeenLastCalledWith(expect.objectContaining({start: 9, exit: 14}));
+});

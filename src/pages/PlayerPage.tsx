@@ -27,17 +27,27 @@ export function PlayerPage({song, minimized, onLibrary, onExpand, onUpdate, onDe
   const sections = useMemo(() => getSections(song), [song]);
   const eligible = useMemo(() => sections.filter(s => s.lineIds.every(id => {const line = song.lines.find(l => l.id === id); return line && usable(line); })), [sections, song]);
   const [loopId, setLoopId] = useState<string | null>(null);
-  const loopSection = eligible.find(s => s.id === loopId);
+  const [practiceRange, setPracticeRange] = useState<[number, number] | null>(null);
+  const [chunkSize, setChunkSize] = useState(2);
+  const loopParent = eligible.find(s => s.id === loopId);
+  const loopSection = useMemo(() => {
+    if (!loopParent || !practiceRange) return loopParent;
+    const lineIds = loopParent.lineIds.slice(practiceRange[0], practiceRange[1] + 1);
+    const first = song.lines.find(l => l.id === lineIds[0]);
+    const last = song.lines.find(l => l.id === lineIds.at(-1));
+    return first && last ? {...loopParent, lineIds, start: first.start, end: last.end,
+      name: `${loopParent.name} · lines ${practiceRange[0] + 1}–${practiceRange[1] + 1}`} : loopParent;
+  }, [loopParent, practiceRange, song.lines]);
   const saveProgress = useRef(() => {});
   saveProgress.current = () => {
     const position = transport.getSnapshot().position;
     writeLocal(`listening.position.${song.id}`, position);
-    if (loopSection) savePractice(song, loopSection, position);
+    if (loopParent) savePractice(song, loopParent, position, practiceRange, chunkSize);
   };
   const tracker = useRef(new ListenTracker());
   const listens = useListenCounts(song.id);
   const countRef = useRef(listens.record); countRef.current = listens.record;
-  const [drawer, setDrawer] = useState<"settings" | "timing" | null>(null);
+  const [drawer, setDrawer] = useState<"settings" | "timing" | "practice" | null>(null);
   const [browsing, setBrowsing] = useState(false);
   const [fontSize, setFontSize] = useState(readLocal("listening.fontSize", 48));
   const [showEmojis, setShowEmojis] = useState(() => readLocal("listening.showEmojis", false));
@@ -63,9 +73,11 @@ export function PlayerPage({song, minimized, onLibrary, onExpand, onUpdate, onDe
     const saved = resumeFocus && !autoPlay ? savedPractice(song) : null;
     if (saved) {
       setLoopId(saved.section.id);
+      setPracticeRange(saved.range);
+      setChunkSize(saved.chunkSize);
       void transport.play(saved.position);
     } else if (autoPlay) {
-      setLoopId(null);
+      setLoopId(null); setPracticeRange(null);
       void transport.play(0);
     } else transport.seek(readLocal(positionKey, 0));
   }, [transport, openRequest, resumeFocus, autoPlay, song, positionKey]);
@@ -82,11 +94,11 @@ export function PlayerPage({song, minimized, onLibrary, onExpand, onUpdate, onDe
   useEffect(() => {
     if (loopRevision.current.songId !== song.id || loopRevision.current.revision !== song.alignmentRevision) {
       loopRevision.current = {songId: song.id, revision: song.alignmentRevision};
-      setLoopId(null);
+      setLoopId(null); setPracticeRange(null);
     }
   }, [song.id, song.alignmentRevision]);
   useEffect(() => {
-    if (player.status !== "playing") return;
+    if (player.status !== "playing") { transport.setTransition(null); return; }
     if (!loopSection) { transport.setTransition(null); return; }
     // Schedule on the audio clock; recover if a suspended tab missed the boundary.
     if (player.position >= loopSection.end) {
@@ -117,14 +129,31 @@ export function PlayerPage({song, minimized, onLibrary, onExpand, onUpdate, onDe
     if (container && line) container.scrollTo({top: line.offsetTop - container.offsetTop - container.clientHeight * .38 + line.clientHeight / 2,
       behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth"});
   }, [displayed, browsing, minimized, fontSize, emojiDensity, showEmojis]);
-  const jump = (position: number) => { if (loopSection && (position < loopSection.start || position >= loopSection.end)) setLoopId(null); tracker.current.reset(); transport.seek(position); setBrowsing(false); setNotice(""); };
+  const jump = (position: number) => { if (loopSection && (position < loopSection.start || position >= loopSection.end)) { setLoopId(null); setPracticeRange(null); } tracker.current.reset(); transport.seek(position); setBrowsing(false); setNotice(""); };
   const toggleSectionLoop = (section: SectionOccurrence) => {
+    setPracticeRange(null);
     if (loopId !== section.id) savePractice(song, section, section.start);
     setLoopId(loopId === section.id ? null : section.id);
     tracker.current.reset();
     transport.seek(section.start);
     setBrowsing(false);
     setNotice("");
+  };
+  const practiceSection = loopParent ?? currentSection;
+  const startPractice = (from: number, to: number, size = chunkSize) => {
+    if (!practiceSection || !eligible.some(s => s.id === practiceSection.id)) return;
+    const range: [number, number] = [from, Math.min(to, practiceSection.lineIds.length - 1)];
+    const first = song.lines.find(l => l.id === practiceSection.lineIds[from]);
+    if (!first) return;
+    transport.setTransition(null);
+    setLoopId(practiceSection.id);
+    setPracticeRange(range);
+    savePractice(song, practiceSection, first.start, range, size);
+    tracker.current.reset();
+    transport.seek(first.start);
+    setBrowsing(false);
+    setNotice("");
+    setDrawer(null);
   };
   const loopButton = (section: SectionOccurrence) => <button className="section-loop" aria-label={`Loop ${section.name}`} aria-pressed={loopId === section.id}
     disabled={!eligible.some(s => s.id === section.id)} title={loopId === section.id ? "Turn loop off and jump to section" : "Loop and jump to section"}
@@ -177,20 +206,39 @@ export function PlayerPage({song, minimized, onLibrary, onExpand, onUpdate, onDe
       {browsing && <button className="follow-button" onClick={() => setBrowsing(false)}>Follow lyrics <ArrowRight size={15}/></button>}
       <div className="stage-status" role="status">{player.error || queueError || notice || listens.error || (loopSection ? `Looping ${loopSection.name}. Click its loop button to turn it off.` : "") || (!song.lines.some(usable) ? "Lyrics are readable. Add line timing for synchronized scrolling." : "Click any section or lyric to jump. Your music keeps flowing.")}</div>
     </main></div>
-    <footer className="listening-footer"><div className="scrubber"><span>{formatTime(player.position)}</span><input type="range" aria-label="Song position" min={0} max={player.duration || song.duration || 1} step=".01" value={player.position} onChange={e => jump(Number(e.target.value))}/><span>{formatTime(player.duration || song.duration)}</span></div>
+    <footer className="listening-footer">
+      {loopSection && practiceRange && <div className="practice-navigation">
+        <button className="subtle-button" aria-label="Previous practice chunk" disabled={practiceRange[0] === 0} onClick={() => {startPractice(Math.max(0, practiceRange[0] - chunkSize), practiceRange[0] - 1);}}><ArrowLeft size={16}/> Previous</button>
+        <span>{loopSection.name}</span>
+        <button className="subtle-button" aria-label="Next practice chunk" disabled={practiceRange[1] >= loopParent!.lineIds.length - 1} onClick={() => startPractice(practiceRange[1] + 1, practiceRange[1] + chunkSize)}>Next <ArrowRight size={16}/></button>
+      </div>}
+      <div className="scrubber"><span>{formatTime(player.position)}</span><input type="range" aria-label="Song position" min={0} max={player.duration || song.duration || 1} step=".01" value={player.position} onChange={e => jump(Number(e.target.value))}/><span>{formatTime(player.duration || song.duration)}</span></div>
       <div className="listening-controls">
         <button className="icon-button" aria-label={shuffle ? "Shuffle on" : "Shuffle off"} aria-pressed={shuffle} title="Shuffle library songs" onClick={onShuffle}><Shuffle size={20}/></button>
         <button className="icon-button" aria-label="Previous song" title="Previous song" disabled={queueBusy} onClick={onPreviousSong}><SkipBack size={22}/></button>
         <button className="play-button" aria-label={playing ? "Pause" : "Play"} onClick={toggle}>{playing ? <Pause fill="currentColor"/> : <Play fill="currentColor"/>}</button>
         <button className="icon-button" aria-label="Next song" title="Next song" disabled={queueBusy} onClick={onNextSong}><SkipForward size={22}/></button>
         <button className="icon-button" aria-label={`Repeat ${repeat}`} aria-pressed={repeat !== "off"} title={repeat === "off" ? "Repeat off — click to repeat library" : repeat === "all" ? "Repeat library — click to loop this song" : "Loop this song — click to turn repeat off"} onClick={onRepeat}>{repeat === "one" ? <Repeat1 size={20}/> : <Repeat size={20}/>}</button>
+        <button className="subtle-button practice-button" aria-pressed={!!loopSection} onClick={() => setDrawer("practice")}>Practice</button>
         <button className="subtle-button restart-song" onClick={() => jump(0)}><RotateCcw size={16}/> From beginning</button>
       </div>
     </footer>
-    {drawer && <Drawer title={drawer === "timing" ? "Timing & sections" : "Listening settings"} onClose={() => setDrawer(null)}>
-      {drawer === "timing" ? <><button className="button secondary" onClick={toggle}>{playing ? "Pause" : "Play"}</button><TimingEditor key={song.alignmentRevision} song={song} position={player.position} onSeek={jump} onSave={onUpdate}/></> : <div className="settings-form">
+    {drawer && <Drawer title={drawer === "timing" ? "Timing & sections" : drawer === "practice" ? "Practice a few lines" : "Listening settings"} onClose={() => setDrawer(null)}>
+      {drawer === "practice" ? <div className="settings-form">
+        <p>{practiceSection?.name ?? "Choose a section"} · {practiceSection?.lineIds.length ?? 0} lines. Pick a smaller part to repeat. Press Play when you’re ready.</p>
+        <div className="practice-options">
+          {[{label: "Whole verse", from: 0, size: practiceSection?.lineIds.length ?? 0},
+            {label: "First half", from: 0, size: Math.ceil((practiceSection?.lineIds.length ?? 0) / 2)},
+            {label: "Second half", from: Math.ceil((practiceSection?.lineIds.length ?? 0) / 2), size: Math.ceil((practiceSection?.lineIds.length ?? 0) / 2)},
+            {label: "2 lines at a time", from: 0, size: 2}, {label: "4 lines at a time", from: 0, size: 4}].map(option => <button key={option.label} className="button secondary"
+              disabled={!practiceSection || !eligible.some(s => s.id === practiceSection.id) || option.from >= practiceSection.lineIds.length}
+              onClick={() => {setChunkSize(option.size); startPractice(option.from, option.from + option.size - 1, option.size);}}>{option.label}</button>)}
+        </div>
+        {practiceSection && !eligible.some(s => s.id === practiceSection.id) && <p>Add line timing to this section to practice smaller parts.</p>}
+        {loopSection && <button className="button secondary" onClick={() => {setLoopId(null); setPracticeRange(null); transport.setTransition(null); setDrawer(null);}}>Stop practicing</button>}
+      </div> : drawer === "timing" ? <><button className="button secondary" onClick={toggle}>{playing ? "Pause" : "Play"}</button><TimingEditor key={song.alignmentRevision} song={song} position={player.position} onSeek={jump} onSave={onUpdate}/></> : <div className="settings-form">
         <label>Lyric size<input type="range" min={28} max={72} value={fontSize} onChange={e => {setFontSize(Number(e.target.value)); writeLocal("listening.fontSize", Number(e.target.value));}}/></label>
-        <label><input type="checkbox" checked={showEmojis} onChange={event => {setShowEmojis(event.target.checked); writeLocal("listening.showEmojis", event.target.checked);}}/> Show lyric emojis</label>
+        <div className="desktop-emoji-settings"><label><input type="checkbox" checked={showEmojis} onChange={event => {setShowEmojis(event.target.checked); writeLocal("listening.showEmojis", event.target.checked);}}/> Show lyric emojis</label>
         {showEmojis && <>
           <label>Emoji density <span>{visiblePins.length}/{emojiCandidates.length}</span>
             <input aria-label="Emoji density" type="range" min="0" max="100" step="1" value={emojiDensity} disabled={!emojiCandidates.length}
@@ -199,6 +247,7 @@ export function PlayerPage({song, minimized, onLibrary, onExpand, onUpdate, onDe
           </label>
           {!emojiCandidates.length && <p>No emoji cues are available for this song yet.</p>}
         </>}
+        </div>
         {!browserMode && <><h3>Section headings from Genius</h3><p>Match human-written verse and chorus headings to your existing lyrics. Your words and timing stay intact.</p>
         <label>Genius song URL<input type="url" placeholder="https://genius.com/…-lyrics" value={geniusUrl} onChange={e => setGeniusUrl(e.target.value)}/></label>
         <button className="button secondary" disabled={busy} onClick={async () => {setBusy(true); try {onUpdate(await api.geniusSections(song.id, {url: geniusUrl, title: song.title, artist: song.artist, revision: song.alignmentRevision ?? 0})); setNotice("Genius section headings applied.");} catch(e) {setNotice(String(e));} finally {setBusy(false);}}}>{busy ? "Matching sections…" : "Get Genius sections"}</button>
