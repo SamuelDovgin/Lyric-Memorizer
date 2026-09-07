@@ -40,9 +40,10 @@ export function PlayerPage({song, minimized, onLibrary, onExpand, onUpdate, onDe
   const [drawer, setDrawer] = useState<"settings" | "timing" | null>(null);
   const [browsing, setBrowsing] = useState(false);
   const [fontSize, setFontSize] = useState(readLocal("listening.fontSize", 48));
+  const [showEmojis, setShowEmojis] = useState(() => readLocal("listening.showEmojis", false));
   const [emojiDensity, setEmojiDensity] = useState(() => Math.max(0, Math.min(100, readLocal<number>(`listening.reviewedEmojiDensity.${song.id}`, 50))));
   const emojiCandidates = useMemo(() => densityCandidates(song), [song.lines, song.emojiPins]);
-  const visiblePins = useMemo(() => pinsAtDensity(emojiCandidates, emojiDensity), [emojiCandidates, emojiDensity]);
+  const visiblePins = useMemo(() => showEmojis ? pinsAtDensity(emojiCandidates, emojiDensity) : [], [emojiCandidates, emojiDensity, showEmojis]);
   const [notice, setNotice] = useState("");
   const [geniusUrl, setGeniusUrl] = useState("");
   const [busy, setBusy] = useState(false);
@@ -115,7 +116,7 @@ export function PlayerPage({song, minimized, onLibrary, onExpand, onUpdate, onDe
     const line = container?.querySelector<HTMLElement>(`[data-line="${displayed}"]`);
     if (container && line) container.scrollTo({top: line.offsetTop - container.offsetTop - container.clientHeight * .38 + line.clientHeight / 2,
       behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth"});
-  }, [displayed, browsing, minimized, fontSize, emojiDensity]);
+  }, [displayed, browsing, minimized, fontSize, emojiDensity, showEmojis]);
   const jump = (position: number) => { if (loopSection && (position < loopSection.start || position >= loopSection.end)) setLoopId(null); tracker.current.reset(); transport.seek(position); setBrowsing(false); setNotice(""); };
   const toggleSectionLoop = (section: SectionOccurrence) => {
     if (loopId !== section.id) savePractice(song, section, section.start);
@@ -181,12 +182,6 @@ export function PlayerPage({song, minimized, onLibrary, onExpand, onUpdate, onDe
         <button className="icon-button" aria-label={shuffle ? "Shuffle on" : "Shuffle off"} aria-pressed={shuffle} title="Shuffle library songs" onClick={onShuffle}><Shuffle size={20}/></button>
         <button className="icon-button" aria-label="Previous song" title="Previous song" disabled={queueBusy} onClick={onPreviousSong}><SkipBack size={22}/></button>
         <button className="play-button" aria-label={playing ? "Pause" : "Play"} onClick={toggle}>{playing ? <Pause fill="currentColor"/> : <Play fill="currentColor"/>}</button>
-        <div className="emoji-density-control" title={emojiCandidates.length ? `Confidence cutoff: ${visiblePins.length ? (visiblePins.at(-1) as {confidence?: number})?.confidence ?? "unscored" : "none"}/100. Slide right to include weaker reviewed cues.` : "No reviewed pins yet. Run the lyric-emoji-pins skill for this song."}>
-          <label htmlFor={`emoji-density-${song.id}`}>Emojis <span>{visiblePins.length}/{emojiCandidates.length}</span></label>
-          <input id={`emoji-density-${song.id}`} aria-label="Emoji density" type="range" min="0" max="100" step="1" value={emojiDensity} disabled={!emojiCandidates.length}
-            aria-valuetext={`${visiblePins.length} of ${emojiCandidates.length} reviewed pins`}
-            onChange={event => {const value = Number(event.target.value); setEmojiDensity(value); writeLocal(`listening.reviewedEmojiDensity.${song.id}`, value);}}/>
-        </div>
         <button className="icon-button" aria-label="Next song" title="Next song" disabled={queueBusy} onClick={onNextSong}><SkipForward size={22}/></button>
         <button className="icon-button" aria-label={`Repeat ${repeat}`} aria-pressed={repeat !== "off"} title={repeat === "off" ? "Repeat off — click to repeat library" : repeat === "all" ? "Repeat library — click to loop this song" : "Loop this song — click to turn repeat off"} onClick={onRepeat}>{repeat === "one" ? <Repeat1 size={20}/> : <Repeat size={20}/>}</button>
         <button className="subtle-button restart-song" onClick={() => jump(0)}><RotateCcw size={16}/> From beginning</button>
@@ -195,6 +190,15 @@ export function PlayerPage({song, minimized, onLibrary, onExpand, onUpdate, onDe
     {drawer && <Drawer title={drawer === "timing" ? "Timing & sections" : "Listening settings"} onClose={() => setDrawer(null)}>
       {drawer === "timing" ? <><button className="button secondary" onClick={toggle}>{playing ? "Pause" : "Play"}</button><TimingEditor key={song.alignmentRevision} song={song} position={player.position} onSeek={jump} onSave={onUpdate}/></> : <div className="settings-form">
         <label>Lyric size<input type="range" min={28} max={72} value={fontSize} onChange={e => {setFontSize(Number(e.target.value)); writeLocal("listening.fontSize", Number(e.target.value));}}/></label>
+        <label><input type="checkbox" checked={showEmojis} onChange={event => {setShowEmojis(event.target.checked); writeLocal("listening.showEmojis", event.target.checked);}}/> Show lyric emojis</label>
+        {showEmojis && <>
+          <label>Emoji density <span>{visiblePins.length}/{emojiCandidates.length}</span>
+            <input aria-label="Emoji density" type="range" min="0" max="100" step="1" value={emojiDensity} disabled={!emojiCandidates.length}
+              aria-valuetext={`${visiblePins.length} of ${emojiCandidates.length} reviewed pins`}
+              onChange={event => {const value = Number(event.target.value); setEmojiDensity(value); writeLocal(`listening.reviewedEmojiDensity.${song.id}`, value);}}/>
+          </label>
+          {!emojiCandidates.length && <p>No emoji cues are available for this song yet.</p>}
+        </>}
         {!browserMode && <><h3>Section headings from Genius</h3><p>Match human-written verse and chorus headings to your existing lyrics. Your words and timing stay intact.</p>
         <label>Genius song URL<input type="url" placeholder="https://genius.com/…-lyrics" value={geniusUrl} onChange={e => setGeniusUrl(e.target.value)}/></label>
         <button className="button secondary" disabled={busy} onClick={async () => {setBusy(true); try {onUpdate(await api.geniusSections(song.id, {url: geniusUrl, title: song.title, artist: song.artist, revision: song.alignmentRevision ?? 0})); setNotice("Genius section headings applied.");} catch(e) {setNotice(String(e));} finally {setBusy(false);}}}>{busy ? "Matching sections…" : "Get Genius sections"}</button>

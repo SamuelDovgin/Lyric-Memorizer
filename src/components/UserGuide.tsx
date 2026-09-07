@@ -6,6 +6,6 @@ export function UserGuide() {
     <section><h3>Your song map</h3><p>The song map appears beside the lyrics on desktop and across the top on phones. Scroll lyrics freely; Follow lyrics returns to the current line. Space plays or pauses; arrow keys move between lines.</p></section>
     <section><h3>Every listen adds up</h3><p>Each section shows its lifetime completed plays. Listen through at least 90% of the section in one visit to count a play. Pausing is fine; seeking resets the visit. {browserMode ? "Counts save on this device." : "Counts save in this browser and sync to the local database."} They describe listening, not mastery.</p></section>
     {!browserMode && <section><h3>Better section headings</h3><p>Paste a Genius song URL during import to fetch lyrics with verse and chorus labels using LyricsGenius. Then check LRCLIB for timing. For existing songs, Settings → Get Genius sections matches headings to the current lyrics without replacing words or timing. Mismatched versions are rejected.</p></section>}
-    <section><h3>Make it yours</h3><p>Settings adjusts lyric size. Timing lets you fix line boundaries or rename and split sections. Automatic suggestions remain available when no source headings exist.</p></section>
+    <section><h3>Make it yours</h3><p>Settings adjusts lyric size and lets you turn on lyric emojis. Emojis are off by default. Timing lets you fix line boundaries or rename and split sections. Automatic suggestions remain available when no source headings exist.</p></section>
   </div>;
 }
