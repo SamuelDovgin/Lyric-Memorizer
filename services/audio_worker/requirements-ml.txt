@@ -1,0 +1,3 @@
+# Optional, large local-only models. Install after requirements.txt.
+demucs>=4.0.1,<5
+whisper-timestamped>=1.15,<2

@@ -1,0 +1,37 @@
+{
+  "name": "lyric-memorizer",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -n worker,web -c magenta,cyan \"npm:dev:worker\" \"npm:dev:web\"",
+    "dev:web": "vite",
+    "dev:worker": "python3 -m uvicorn services.audio_worker.app:app --reload --port 8765",
+    "build": "tsc -b && vite build",
+    "test": "vitest run",
+    "test:worker": "python3 -m pytest services/audio_worker/tests -q",
+    "demo:assets": "python3 scripts/create_demo_audio.py",
+    "check": "npm run test && npm run build && npm run test:worker",
+    "test:e2e": "npm run demo:assets && playwright test"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "emojilib": "4.0.3",
+    "lucide-react": "latest",
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@testing-library/jest-dom": "latest",
+    "@testing-library/react": "latest",
+    "@types/node": "^26.4.1",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "concurrently": "latest",
+    "jsdom": "29.1.1",
+    "typescript": "latest",
+    "vite": "latest",
+    "vitest": "latest"
+  }
+}

@@ -1,0 +1,526 @@
+{
+  "pins": [
+    {
+      "lineId": "line_53aeb2c19b5c44b0a3144fcf378cabda",
+      "lineText": "Are you happy? (Happy, happy)",
+      "wordIndex": 2,
+      "anchor": "happy?",
+      "emoji": "🤔",
+      "meaning": "Asking whether you are happy",
+      "confidence": 78
+    },
+    {
+      "lineId": "line_5d02fa12c32b47dd975613976f33c7bb",
+      "lineText": "Who would get mad at you doing what you wanna do?",
+      "wordIndex": 3,
+      "anchor": "mad",
+      "emoji": "😠",
+      "meaning": "Getting mad",
+      "confidence": 96
+    },
+    {
+      "lineId": "line_7c019d8465084ebbb8c7141d6eac2ca7",
+      "lineText": "Then, be happy (Happy, happy)",
+      "wordIndex": 0,
+      "anchor": "Then,",
+      "emoji": "👉",
+      "meaning": "Then: giving permission to be happy",
+      "confidence": 52
+    },
+    {
+      "lineId": "line_952884d9307f4d42a292bbf51d246c97",
+      "lineText": "I just couldn't get mad at you, whomever you're callin' \"boo\"",
+      "wordIndex": 2,
+      "anchor": "couldn't",
+      "emoji": "🙅",
+      "meaning": "Could not get mad",
+      "confidence": 74
+    },
+    {
+      "lineId": "line_18b7304df2154f4b9641d1074efc3829",
+      "lineText": "As long as you're happy too",
+      "wordIndex": 1,
+      "anchor": "long",
+      "emoji": "🤝",
+      "meaning": "As long as: accepting your happiness too",
+      "confidence": 55
+    },
+    {
+      "lineId": "line_6dfd170f43c149ad9e07e7df88bbee9d",
+      "lineText": "Brise mon cœur, encore, ce soir",
+      "wordIndex": 0,
+      "anchor": "Brise",
+      "emoji": "💔",
+      "meaning": "Brise: break my heart",
+      "confidence": 98
+    },
+    {
+      "lineId": "line_a676e16a15324a029efaf939b6e1be83",
+      "lineText": "Brise mon cœur, encore, ce soir",
+      "wordIndex": 0,
+      "anchor": "Brise",
+      "emoji": "💔",
+      "meaning": "Brise: break my heart",
+      "confidence": 98
+    },
+    {
+      "lineId": "line_d7a516f8a74d4a5688239832f49ffedb",
+      "lineText": "Brise mon cœur, encore, ce soir",
+      "wordIndex": 0,
+      "anchor": "Brise",
+      "emoji": "💔",
+      "meaning": "Brise: break my heart",
+      "confidence": 98
+    },
+    {
+      "lineId": "line_722dd4a8f8d5471fa41758fabcfde58b",
+      "lineText": "Brise mon cœur, encore, ce soir",
+      "wordIndex": 0,
+      "anchor": "Brise",
+      "emoji": "💔",
+      "meaning": "Brise: break my heart",
+      "confidence": 98
+    },
+    {
+      "lineId": "line_3e708eb3d9764126b356e94b95c493da",
+      "lineText": "If I knew just what you wanted",
+      "wordIndex": 2,
+      "anchor": "knew",
+      "emoji": "💭",
+      "meaning": "If I knew what you wanted",
+      "confidence": 84
+    },
+    {
+      "lineId": "line_a644326d2a684695a67d9e2e1eb7a606",
+      "lineText": "Would it stop you? Would it change me?",
+      "wordIndex": 2,
+      "anchor": "stop",
+      "emoji": "🛑",
+      "meaning": "Would it stop you?",
+      "confidence": 97
+    },
+    {
+      "lineId": "line_a644326d2a684695a67d9e2e1eb7a606",
+      "lineText": "Would it stop you? Would it change me?",
+      "wordIndex": 6,
+      "anchor": "change",
+      "emoji": "🦋",
+      "meaning": "Would it change me?",
+      "confidence": 72
+    },
+    {
+      "lineId": "line_3821de9594054aaf9d39be7d6b466487",
+      "lineText": "Does the key go to your locket?",
+      "wordIndex": 2,
+      "anchor": "key",
+      "emoji": "🔑",
+      "meaning": "The key to your locket",
+      "confidence": 99
+    },
+    {
+      "lineId": "line_bac7d876acc347bfa9b89edde90cad20",
+      "lineText": "Is it natural? Is it crazy?",
+      "wordIndex": 2,
+      "anchor": "natural?",
+      "emoji": "🌿",
+      "meaning": "Is it natural?",
+      "confidence": 81
+    },
+    {
+      "lineId": "line_bac7d876acc347bfa9b89edde90cad20",
+      "lineText": "Is it natural? Is it crazy?",
+      "wordIndex": 5,
+      "anchor": "crazy?",
+      "emoji": "🌀",
+      "meaning": "Is it crazy?",
+      "confidence": 67
+    },
+    {
+      "lineId": "line_e0ae6efb31334f3bbc45ec3447e05525",
+      "lineText": "I found you in the Westin (In the Westin)",
+      "wordIndex": 1,
+      "anchor": "found",
+      "emoji": "📍",
+      "meaning": "I found you",
+      "confidence": 82
+    },
+    {
+      "lineId": "line_e0ae6efb31334f3bbc45ec3447e05525",
+      "lineText": "I found you in the Westin (In the Westin)",
+      "wordIndex": 5,
+      "anchor": "Westin",
+      "emoji": "🏨",
+      "meaning": "Westin hotel",
+      "confidence": 95
+    },
+    {
+      "lineId": "line_1da65d46762443049cf8044630d118ad",
+      "lineText": "With a statue of a lady",
+      "wordIndex": 2,
+      "anchor": "statue",
+      "emoji": "🗽",
+      "meaning": "A statue of a lady",
+      "confidence": 92
+    },
+    {
+      "lineId": "line_8b210e71dce5432888e5084e563a6cca",
+      "lineText": "She looked just like a best friend (Best friend)",
+      "wordIndex": 1,
+      "anchor": "looked",
+      "emoji": "👀",
+      "meaning": "She looked like a best friend",
+      "confidence": 88
+    },
+    {
+      "lineId": "line_05eb36a71b64460cabbee05e7783b9ad",
+      "lineText": "Was it friendship you were chasing?",
+      "wordIndex": 2,
+      "anchor": "friendship",
+      "emoji": "🫂",
+      "meaning": "Friendship you were chasing",
+      "confidence": 93
+    },
+    {
+      "lineId": "line_16148ab7cf3542baa1cd779d5275c98a",
+      "lineText": "Brise mon cœur, encore, ce soir",
+      "wordIndex": 0,
+      "anchor": "Brise",
+      "emoji": "💔",
+      "meaning": "Brise: break my heart",
+      "confidence": 98
+    },
+    {
+      "lineId": "line_0432484fea424119bc8ae459b346d9b8",
+      "lineText": "Are you happy? (Happy, happy)",
+      "wordIndex": 2,
+      "anchor": "happy?",
+      "emoji": "🤔",
+      "meaning": "Asking whether you are happy",
+      "confidence": 78
+    },
+    {
+      "lineId": "line_6d701cf48c864c548d1c5b8941db8ca4",
+      "lineText": "Who would get mad at you doing what you wanna do?",
+      "wordIndex": 3,
+      "anchor": "mad",
+      "emoji": "😠",
+      "meaning": "Getting mad",
+      "confidence": 96
+    },
+    {
+      "lineId": "line_a24b8709401e4cf6aee751a64d70bebf",
+      "lineText": "Then, be happy (Happy, happy)",
+      "wordIndex": 0,
+      "anchor": "Then,",
+      "emoji": "👉",
+      "meaning": "Then: giving permission to be happy",
+      "confidence": 52
+    },
+    {
+      "lineId": "line_673b8cfee7924400b3a7f2a39896e7e5",
+      "lineText": "I just couldn't get mad at you, whomever you're callin' \"boo\"",
+      "wordIndex": 2,
+      "anchor": "couldn't",
+      "emoji": "🙅",
+      "meaning": "Could not get mad",
+      "confidence": 74
+    },
+    {
+      "lineId": "line_3bd8cf73d3d9482c9f66e0efbc777ef9",
+      "lineText": "As long as you're happy too",
+      "wordIndex": 1,
+      "anchor": "long",
+      "emoji": "🤝",
+      "meaning": "As long as: accepting your happiness too",
+      "confidence": 55
+    },
+    {
+      "lineId": "line_5d31df2cf6c5455f89dcfcdf9e00f086",
+      "lineText": "Brise mon cœur, encore, ce soir",
+      "wordIndex": 0,
+      "anchor": "Brise",
+      "emoji": "💔",
+      "meaning": "Brise: break my heart",
+      "confidence": 98
+    },
+    {
+      "lineId": "line_f486659960f9494f92173e2389792fdd",
+      "lineText": "Brise mon cœur, encore, ce soir",
+      "wordIndex": 0,
+      "anchor": "Brise",
+      "emoji": "💔",
+      "meaning": "Brise: break my heart",
+      "confidence": 98
+    },
+    {
+      "lineId": "line_419d6f71d71a4fe5baf940ff0a4c6507",
+      "lineText": "Brise mon cœur, encore, ce soir",
+      "wordIndex": 0,
+      "anchor": "Brise",
+      "emoji": "💔",
+      "meaning": "Brise: break my heart",
+      "confidence": 98
+    },
+    {
+      "lineId": "line_f0c13bb9dae34b33857cc232cc295c7c",
+      "lineText": "Brise mon cœur, encore, ce soir",
+      "wordIndex": 0,
+      "anchor": "Brise",
+      "emoji": "💔",
+      "meaning": "Brise: break my heart",
+      "confidence": 98
+    },
+    {
+      "lineId": "line_b098180ee6ab4bc5907eb16dda6370de",
+      "lineText": "It's sweet, dancing with you in the nude is my niche",
+      "wordIndex": 1,
+      "anchor": "sweet,",
+      "emoji": "🍯",
+      "meaning": "Sweet",
+      "confidence": 83
+    },
+    {
+      "lineId": "line_b098180ee6ab4bc5907eb16dda6370de",
+      "lineText": "It's sweet, dancing with you in the nude is my niche",
+      "wordIndex": 2,
+      "anchor": "dancing",
+      "emoji": "💃",
+      "meaning": "Dancing together",
+      "confidence": 98
+    },
+    {
+      "lineId": "line_4d3e87d3294143319bc8bd0b35064b2e",
+      "lineText": "Tell me you don't tell her what you told me",
+      "wordIndex": 0,
+      "anchor": "Tell",
+      "emoji": "🤫",
+      "meaning": "Tell me: private words shared with someone else",
+      "confidence": 69
+    },
+    {
+      "lineId": "line_0a153eb788984952a31800056f0cf207",
+      "lineText": "Can't be right the way I'm grittin' my teeth",
+      "wordIndex": 0,
+      "anchor": "Can't",
+      "emoji": "⛔",
+      "meaning": "Cannot be right",
+      "confidence": 76
+    },
+    {
+      "lineId": "line_0a153eb788984952a31800056f0cf207",
+      "lineText": "Can't be right the way I'm grittin' my teeth",
+      "wordIndex": 8,
+      "anchor": "teeth",
+      "emoji": "🦷",
+      "meaning": "Gritting my teeth",
+      "confidence": 99
+    },
+    {
+      "lineId": "line_3e6ac605dcc64e47a02e11aa94a40dc8",
+      "lineText": "Got me sittin' at home waiting to hear the phone ring",
+      "wordIndex": 2,
+      "anchor": "sittin'",
+      "emoji": "🪑",
+      "meaning": "Sitting at home",
+      "confidence": 89
+    },
+    {
+      "lineId": "line_3e6ac605dcc64e47a02e11aa94a40dc8",
+      "lineText": "Got me sittin' at home waiting to hear the phone ring",
+      "wordIndex": 9,
+      "anchor": "phone",
+      "emoji": "☎️",
+      "meaning": "Waiting for the phone to ring",
+      "confidence": 99
+    },
+    {
+      "lineId": "line_f7d6912ef3cf4dd7bf9fc5a13dbc8529",
+      "lineText": "We got roots and, baby, they could run deep",
+      "wordIndex": 2,
+      "anchor": "roots",
+      "emoji": "🌳",
+      "meaning": "Roots that run deep",
+      "confidence": 94
+    },
+    {
+      "lineId": "line_81a7d8e147dc408183f21c9ec18a033f",
+      "lineText": "But you cutting me off, I feel like ripping this tree",
+      "wordIndex": 2,
+      "anchor": "cutting",
+      "emoji": "✂️",
+      "meaning": "Cutting me off",
+      "confidence": 97
+    },
+    {
+      "lineId": "line_f0e8fe5cd997437792b06b473665e0a4",
+      "lineText": "Hittin' a wall I fell a hundred feet deep",
+      "wordIndex": 0,
+      "anchor": "Hittin'",
+      "emoji": "🧱",
+      "meaning": "Hitting a wall",
+      "confidence": 96
+    },
+    {
+      "lineId": "line_306aff7768a345439e73fcb06edca83c",
+      "lineText": "All the bitches involved should know that pimpin' ain't cheap",
+      "wordIndex": 3,
+      "anchor": "involved",
+      "emoji": "👥",
+      "meaning": "Everyone involved",
+      "confidence": 71
+    },
+    {
+      "lineId": "line_306aff7768a345439e73fcb06edca83c",
+      "lineText": "All the bitches involved should know that pimpin' ain't cheap",
+      "wordIndex": 9,
+      "anchor": "cheap",
+      "emoji": "💸",
+      "meaning": "Pimping is not cheap",
+      "confidence": 91
+    },
+    {
+      "lineId": "line_a984f2fbb98b40cb85ac7da82821807b",
+      "lineText": "TLC, I saw, I creeped",
+      "wordIndex": 0,
+      "anchor": "TLC,",
+      "emoji": "📺",
+      "meaning": "TLC: the music reference",
+      "confidence": 42
+    },
+    {
+      "lineId": "line_a984f2fbb98b40cb85ac7da82821807b",
+      "lineText": "TLC, I saw, I creeped",
+      "wordIndex": 4,
+      "anchor": "creeped",
+      "emoji": "🕵️",
+      "meaning": "Creeped",
+      "confidence": 61
+    },
+    {
+      "lineId": "line_bc208925f6084148ba68dc2c4e556d58",
+      "lineText": "She's in our bed, I bought the sheets",
+      "wordIndex": 3,
+      "anchor": "bed,",
+      "emoji": "🛏️",
+      "meaning": "Our bed",
+      "confidence": 99
+    },
+    {
+      "lineId": "line_dd7a0995626c422c813104922a4ea6ea",
+      "lineText": "Pour ça, non merci, j'ai vécu ma vie",
+      "wordIndex": 2,
+      "anchor": "non",
+      "emoji": "🙅‍♀️",
+      "meaning": "Non merci: no thank you",
+      "confidence": 86
+    },
+    {
+      "lineId": "line_75f9dcfad8384be2994cd62f25a51ea1",
+      "lineText": "Don't fall asleep, adieu, bonne nuit",
+      "wordIndex": 2,
+      "anchor": "asleep,",
+      "emoji": "😴",
+      "meaning": "Fall asleep",
+      "confidence": 98
+    },
+    {
+      "lineId": "line_75f9dcfad8384be2994cd62f25a51ea1",
+      "lineText": "Don't fall asleep, adieu, bonne nuit",
+      "wordIndex": 3,
+      "anchor": "adieu,",
+      "emoji": "👋",
+      "meaning": "Adieu: goodbye",
+      "confidence": 96
+    },
+    {
+      "lineId": "line_427244873ffb4dae979a5d9943868c45",
+      "lineText": "Brise mon cœur, encore, ce soir",
+      "wordIndex": 0,
+      "anchor": "Brise",
+      "emoji": "💔",
+      "meaning": "Brise: break my heart",
+      "confidence": 98
+    },
+    {
+      "lineId": "line_89486a1f6ba2466eb48107164b95a2bb",
+      "lineText": "Are you happy? (Happy, happy)",
+      "wordIndex": 2,
+      "anchor": "happy?",
+      "emoji": "🤔",
+      "meaning": "Asking whether you are happy",
+      "confidence": 78
+    },
+    {
+      "lineId": "line_5cdb297aa6fc40d29f8fa885edb32db1",
+      "lineText": "Who would get mad at you doing what you wanna do?",
+      "wordIndex": 3,
+      "anchor": "mad",
+      "emoji": "😠",
+      "meaning": "Getting mad",
+      "confidence": 96
+    },
+    {
+      "lineId": "line_63576020553047bf80ff485060839614",
+      "lineText": "Then be happy (Happy, happy)",
+      "wordIndex": 0,
+      "anchor": "Then",
+      "emoji": "👉",
+      "meaning": "Then: giving permission to be happy",
+      "confidence": 52
+    },
+    {
+      "lineId": "line_1cfb12e2c74646ebb9d364550c9beff6",
+      "lineText": "I just couldn't get mad at you, whomever you're callin' \"boo\"",
+      "wordIndex": 2,
+      "anchor": "couldn't",
+      "emoji": "🙅",
+      "meaning": "Could not get mad",
+      "confidence": 74
+    },
+    {
+      "lineId": "line_8dd1292cf35d44c3921d445d1814a65d",
+      "lineText": "As long as you're happy too",
+      "wordIndex": 1,
+      "anchor": "long",
+      "emoji": "🤝",
+      "meaning": "As long as: accepting your happiness too",
+      "confidence": 55
+    },
+    {
+      "lineId": "line_f694a32d80e1474890e88fd30b667c3f",
+      "lineText": "Brise mon cœur, encore, ce soir",
+      "wordIndex": 0,
+      "anchor": "Brise",
+      "emoji": "💔",
+      "meaning": "Brise: break my heart",
+      "confidence": 98
+    },
+    {
+      "lineId": "line_67a81c22c12b4b69953662f6bbda7cfb",
+      "lineText": "Brise mon cœur, encore, ce soir",
+      "wordIndex": 0,
+      "anchor": "Brise",
+      "emoji": "💔",
+      "meaning": "Brise: break my heart",
+      "confidence": 98
+    },
+    {
+      "lineId": "line_7dd86bf1c60247208e08b8c0bf149668",
+      "lineText": "Brise mon cœur, encore, ce soir",
+      "wordIndex": 0,
+      "anchor": "Brise",
+      "emoji": "💔",
+      "meaning": "Brise: break my heart",
+      "confidence": 98
+    },
+    {
+      "lineId": "line_f12c89e6218c4ef0a26fcdf33b31f8e5",
+      "lineText": "Brise mon cœur, encore, ce soir",
+      "wordIndex": 0,
+      "anchor": "Brise",
+      "emoji": "💔",
+      "meaning": "Brise: break my heart",
+      "confidence": 98
+    }
+  ]
+}
