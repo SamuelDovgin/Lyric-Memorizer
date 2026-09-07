@@ -12,11 +12,14 @@
     "test:worker": "python3 -m pytest services/audio_worker/tests -q",
     "demo:assets": "python3 scripts/create_demo_audio.py",
     "check": "npm run test && npm run build && npm run test:worker",
-    "test:e2e": "npm run demo:assets && playwright test"
+    "test:e2e": "npm run demo:assets && playwright test",
+    "build:pages": "VITE_BROWSER_ONLY=true npm run build && node scripts/build-pages.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
     "emojilib": "4.0.3",
+    "fflate": "^0.8.3",
+    "idb": "^8.0.3",
     "lucide-react": "latest",
     "react": "latest",
     "react-dom": "latest"

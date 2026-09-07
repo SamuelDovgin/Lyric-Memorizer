@@ -1,3 +1,6 @@
+import { OfflineStatus } from "./components/OfflineStatus";
+import { browserMode } from "./lib/browserLibrary";
+import { SongBundles } from "./components/SongBundles";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BookOpen, CircleHelp, Plus, WifiOff } from "lucide-react";
 import { Brand } from "./components/Brand";
@@ -36,7 +39,7 @@ export function App() {
       setSongs(await api.songs());
       setError("");
     } catch {
-      setError("The local audio worker is offline. Start it with npm run dev.");
+      setError(browserMode ? "Could not open device storage. Allow website storage and use a normal browsing window." : "The local audio worker is offline. Start it with npm run dev.");
     } finally {
       setLoading(false);
     }
@@ -120,9 +123,9 @@ export function App() {
             <button onClick={() => setHelp(true)}>
               <CircleHelp size={17} /> Guide
             </button>
-            <button className="accent" onClick={() => setRoute("import")}>
+            {!browserMode && <button className="accent" onClick={() => setRoute("import")}>
               <Plus size={17} /> Add song
-            </button>
+            </button>}
           </nav>
         </header>
       )}
@@ -133,11 +136,12 @@ export function App() {
           <button onClick={() => void refresh()}>Retry</button>
         </div>
       )}
+      {route === "library" && <div className="bundle-wrap">{browserMode && <OfflineStatus/>}<SongBundles songs={songs} onImported={() => void refresh()}/></div>}
       {route === "library" && (
         <LibraryPage
           songs={songs}
           loading={loading}
-          onAdd={() => setRoute("import")}
+          onAdd={() => browserMode ? document.querySelector<HTMLInputElement>('.bundle-import input')?.click() : setRoute("import")}
           onOpen={(id) => void open(id)}
           onPractice={(id) => void open(id, true)}
           onRate={async (id, readiness) => {

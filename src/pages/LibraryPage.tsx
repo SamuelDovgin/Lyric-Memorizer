@@ -1,3 +1,4 @@
+import { browserMode } from "../lib/browserLibrary";
 import { useState } from "react";
 import {
   ArrowRight,
@@ -82,7 +83,7 @@ export function LibraryPage({
         </div>
         {songs.length > 0 && (
           <button className="button secondary" onClick={onAdd}>
-            <Plus size={17} /> Add song
+            <Plus size={17} /> {browserMode ? "Import bundle" : "Add song"}
           </button>
         )}
       </section>
@@ -97,9 +98,9 @@ export function LibraryPage({
             <Music2 size={28} />
           </span>
           <h3>One song is a good place to start.</h3>
-          <p>Bring a recording and its lyrics. No stems or quizzes required.</p>
+          <p>{browserMode ? "Export a song ZIP from your Mac and import it here once." : "Bring a recording and its lyrics. No stems or quizzes required."}</p>
           <button className="button primary" onClick={onAdd}>
-            <Plus size={18} /> Add your first song
+            <Plus size={18} /> {browserMode ? "Import your first bundle" : "Add your first song"}
           </button>
         </div>
       ) : (

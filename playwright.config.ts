@@ -14,6 +14,7 @@ export default defineConfig({
     launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] },
   },
   webServer: [
+    { command: "node scripts/serve-pages-test.mjs", url: "http://127.0.0.1:5175/docs/", reuseExistingServer: false },
     {
       command: "python3 -m uvicorn services.audio_worker.app:app --port 8766",
       url: "http://127.0.0.1:8766/api/health",

@@ -1,3 +1,4 @@
+import { browserMode } from "../lib/browserLibrary";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ArrowLeft, ArrowRight, Clock3, Headphones, Maximize, Pause, Play, RotateCcw, Settings2, SkipBack, SkipForward, Shuffle, Repeat, Repeat1 } from "lucide-react";
 import type { SectionOccurrence, Song } from "../types";
@@ -194,12 +195,12 @@ export function PlayerPage({song, minimized, onLibrary, onExpand, onUpdate, onDe
     {drawer && <Drawer title={drawer === "timing" ? "Timing & sections" : "Listening settings"} onClose={() => setDrawer(null)}>
       {drawer === "timing" ? <><button className="button secondary" onClick={toggle}>{playing ? "Pause" : "Play"}</button><TimingEditor key={song.alignmentRevision} song={song} position={player.position} onSeek={jump} onSave={onUpdate}/></> : <div className="settings-form">
         <label>Lyric size<input type="range" min={28} max={72} value={fontSize} onChange={e => {setFontSize(Number(e.target.value)); writeLocal("listening.fontSize", Number(e.target.value));}}/></label>
-        <h3>Section headings from Genius</h3><p>Match human-written verse and chorus headings to your existing lyrics. Your words and timing stay intact.</p>
+        {!browserMode && <><h3>Section headings from Genius</h3><p>Match human-written verse and chorus headings to your existing lyrics. Your words and timing stay intact.</p>
         <label>Genius song URL<input type="url" placeholder="https://genius.com/…-lyrics" value={geniusUrl} onChange={e => setGeniusUrl(e.target.value)}/></label>
         <button className="button secondary" disabled={busy} onClick={async () => {setBusy(true); try {onUpdate(await api.geniusSections(song.id, {url: geniusUrl, title: song.title, artist: song.artist, revision: song.alignmentRevision ?? 0})); setNotice("Genius section headings applied.");} catch(e) {setNotice(String(e));} finally {setBusy(false);}}}>{busy ? "Matching sections…" : "Get Genius sections"}</button>
         <small>Paste a song link, or leave it blank to search Genius by title and artist. No API token is required.</small>
         <p role="status">{notice}</p>
-        <button className="button secondary" disabled={busy} onClick={async () => {setBusy(true); try {const {jobId} = await api.startAlignment(song.id); let job; do {await new Promise(r => setTimeout(r, 1000)); job = await api.job(jobId);} while (job.status !== "COMPLETE" && job.status !== "FAILED"); if(job.status === "FAILED") throw new Error(job.message); onUpdate(await api.song(song.id)); setNotice("Line timing updated.");} catch(e) {setNotice(String(e));} finally {setBusy(false);}}}>Find line sync</button>
+        <button className="button secondary" disabled={busy} onClick={async () => {setBusy(true); try {const {jobId} = await api.startAlignment(song.id); let job; do {await new Promise(r => setTimeout(r, 1000)); job = await api.job(jobId);} while (job.status !== "COMPLETE" && job.status !== "FAILED"); if(job.status === "FAILED") throw new Error(job.message); onUpdate(await api.song(song.id)); setNotice("Line timing updated.");} catch(e) {setNotice(String(e));} finally {setBusy(false);}}}>Find line sync</button></>}
         <button className="danger-link" onClick={async () => {if (!confirm(`Remove “${song.title}” from this device?`)) return; try {await api.deleteSong(song.id); transport.pause(); onDelete();} catch(e) {setNotice(String(e));}}}>Remove song</button>
       </div>}
     </Drawer>}

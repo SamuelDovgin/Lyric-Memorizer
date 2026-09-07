@@ -110,3 +110,35 @@ Regular library autoplay still starts songs normally without restoring loops.
 word/phrase-to-emoji candidates using the pinned MIT-licensed `emojilib` dependency.
 `--stats` reports coverage. This is an offline annotation helper, not an automatic
 replacement of existing pins; context-sensitive choices still need review.
+
+## Phone player on GitHub Pages
+
+The phone player runs entirely in the browser. No Python server or Mac connection is needed after importing songs. The Mac app keeps its existing preparation tools.
+
+### Enable Pages
+
+The compiled browser player is committed in `docs/`. In this repository's **Settings → Pages**, select **Deploy from a branch**, **main**, and **/docs**, then Save. The expected address is:
+
+[https://samueldovgin.github.io/Lyric-Memorizer/](https://samueldovgin.github.io/Lyric-Memorizer/)
+
+### Take songs to your phone
+
+1. Run the Mac app as usual with `npm run dev`.
+2. In the library, expand **Take songs to your phone**, select songs, and choose **Export selected songs**.
+3. Transfer the one ZIP to your phone using AirDrop or Files. Keep it as your backup.
+4. Open the Pages player. On iPhone, optionally use Safari's **Share → Add to Home Screen**, then open that app before importing so you consistently use the same storage context.
+5. Choose **Import song bundle (.zip)**. Every song is added at once. Wait for **App ready offline** before disconnecting.
+
+Audio, lyrics, timing, sections, emoji pins, and song readiness are included. Importing a song already on the device keeps its existing copy and local edits. To replace it with a newly prepared version, delete it on the phone first and import the new bundle. Export from the phone is also available. Playback position, section bookmarks, and listen counts remain device-specific and are not included in ZIP exports or synced to the Mac.
+
+Songs use IndexedDB and survive normal closing/reopening in the same browser or home-screen app. The app requests persistent storage, but the browser decides whether to grant it. Clearing website data, private browsing, or browser storage eviction can remove songs; retain the ZIP backup. The app shell is cached by a service worker for offline reopening. App updates activate after old app tabs are closed and the player is reopened.
+
+ZIP bundles have a 512 MB audio limit; use several smaller bundles for large libraries. Import requires temporary memory to unpack audio, so smaller bundles are preferable on phones. Audio format support and background/locked-screen playback depend on the phone's browser. YouTube downloading, automatic alignment, and vocal separation remain in the Mac app; the phone supports prepared playback and manual timing edits.
+
+Only the player is published. ZIPs, recordings, and the local Python database are not part of the Pages output.
+
+### Update the published player
+
+Run `npm run build:pages`, then commit and push the source changes and regenerated `docs/` folder to `main`. Pages publishes that folder without a GitHub Actions build workflow. A normal `npm run build` continues to produce the Mac/backend-connected build in `dist/`.
+
+Bundle integration checks: `npm run build:pages && npm run demo:assets && npx playwright test tests/e2e/bundles.spec.ts`. The tests use synthetic recordings and isolated storage, including duplicate import, saved ratings, offline reload/playback, and invalid bundle rejection.

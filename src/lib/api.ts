@@ -1,3 +1,4 @@
+import { browserMode, browserRequest } from "./browserLibrary";
 import type {
   ImportValues,
   LyricLine,
@@ -11,6 +12,7 @@ import type {
 } from "../types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  if (browserMode) return browserRequest(path, init) as Promise<T>;
   const response = await fetch(path, init);
   if (!response.ok) {
     let detail = response.statusText;
