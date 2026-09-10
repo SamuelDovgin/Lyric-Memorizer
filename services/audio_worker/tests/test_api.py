@@ -127,3 +127,50 @@ def test_emoji_pins_validate_anchors_and_preserve_song(tmp_path, monkeypatch):
         assert client.put(endpoint, json={"pins": [{**pin, "wordIndex": 9}]}).status_code == 422
         assert client.put(endpoint, json={"pins": [pin, pin]}).status_code == 422
         assert client.put(endpoint, json={"pins": []}).json()["emojiPins"] == []
+
+
+def test_song_edit_preserves_source_and_rejects_stale_edits(tmp_path, monkeypatch):
+    monkeypatch.setattr(database, 'DATA_DIR', tmp_path)
+    monkeypatch.setattr(database, 'DB_PATH', tmp_path / 'test.sqlite3')
+    monkeypatch.setattr(database, 'SONG_DIR', tmp_path / 'songs')
+    with TestClient(app) as client:
+        original = dict(id='edit-test', title='Old', artist='Artist', lyrics='Old words',
+                        duration=30, lines=[], alignmentRevision=0,
+                        sourceUrl='https://www.youtube.com/watch?v=test',
+                        alignmentSource={'catalogId': 1}, status='READY_NEEDS_REVIEW')
+        database.save_song(original, {'original': '/unchanged.wav'}, 'now')
+        payload = dict(title='New', artist='Artist', lyrics='New words', revision=0)
+        result = client.put('/api/songs/edit-test/edit', json=payload)
+        assert result.status_code == 200, result.text
+        edited = result.json()
+        assert edited['sourceUrl'] == original['sourceUrl']
+        assert edited['lines'] and 'alignmentSource' not in edited
+        assert edited['alignmentRevision'] == 1
+        assert database.get_song('edit-test')[1]['original'] == '/unchanged.wav'
+        assert client.put('/api/songs/edit-test/edit', json=payload).status_code == 409
+        assert client.put('/api/songs/edit-test/edit', json={**payload, 'revision': 1, 'lyrics': ' '}).status_code == 422
+        assert database.get_song('edit-test')[0]['lyrics'] == 'New words'
+
+
+def test_refresh_preview_uses_youtube_metadata_without_saving(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import importlib
+    worker = importlib.import_module('services.audio_worker.app')
+    monkeypatch.setattr(database, 'DATA_DIR', tmp_path)
+    monkeypatch.setattr(database, 'DB_PATH', tmp_path / 'test.sqlite3')
+    monkeypatch.setattr(database, 'SONG_DIR', tmp_path / 'songs')
+    monkeypatch.setattr(worker, 'yt_dlp_command', lambda: ['yt-dlp'])
+    monkeypatch.setattr(worker.subprocess, 'run', lambda *a, **kw: SimpleNamespace(
+        stdout=json.dumps({'title': 'Doja Cat - Cards (Audio)', 'artist': 'Doja Cat'})))
+    def catalog(title, artist, duration, lyrics):
+        assert title == 'Cards' and artist == 'Doja Cat'
+        return {'syncedLyrics': '[00:01]Fresh words', 'plainLyrics': 'Fresh words'}
+    monkeypatch.setattr(worker, 'fetch_synced_lyrics', catalog)
+    with TestClient(app) as client:
+        original = dict(id='preview', title='Wrong title', artist='Wrong artist', lyrics='Keep these',
+                        duration=224, lines=[], sourceUrl='https://www.youtube.com/watch?v=test')
+        database.save_song(original, {}, 'now')
+        result = client.post('/api/songs/preview/refresh-preview')
+        assert result.status_code == 200, result.text
+        assert result.json() == {'title': 'Cards', 'artist': 'Doja Cat', 'lyrics': 'Fresh words'}
+        assert database.get_song('preview')[0]['lyrics'] == 'Keep these'

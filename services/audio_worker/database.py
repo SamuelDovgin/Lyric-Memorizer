@@ -82,6 +82,8 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_reviews_song ON reviews(song_id, reviewed_at);
             """
         )
+        if 'metadata' not in {row['name'] for row in db.execute('PRAGMA table_info(jobs)')}:
+            db.execute("ALTER TABLE jobs ADD COLUMN metadata TEXT NOT NULL DEFAULT '{}'")
 
 
 def save_song(document: dict, paths: dict, now: str, expected_revision: int | None = None) -> None:
@@ -144,17 +146,19 @@ def save_job(job: dict) -> None:
     with connect() as db:
         db.execute(
             """
-            INSERT INTO jobs(id, song_id, kind, status, progress, message, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO jobs(id, song_id, kind, status, progress, message, updated_at, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 status=excluded.status,
                 progress=excluded.progress,
                 message=excluded.message,
+                metadata=excluded.metadata,
                 updated_at=excluded.updated_at
             """,
             (
                 job["id"], job["songId"], job["kind"], job["status"],
                 job.get("progress", 0), job.get("message", ""), job["updatedAt"],
+                json.dumps({key: job[key] for key in ("engine", "outcome") if key in job}),
             ),
         )
 
@@ -168,6 +172,7 @@ def get_job(job_id: str) -> dict | None:
         "id": row["id"], "songId": row["song_id"], "kind": row["kind"],
         "status": row["status"], "progress": row["progress"],
         "message": row["message"], "updatedAt": row["updated_at"],
+        **json.loads(row["metadata"]),
     }
 
 

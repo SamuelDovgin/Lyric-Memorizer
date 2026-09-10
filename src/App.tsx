@@ -31,6 +31,19 @@ export function App() {
   const [resume, setResume] = useState(false);
   const [openRequest, setOpenRequest] = useState(0);
   const openGeneration = useRef(0);
+  const [editing, setEditing] = useState<Song | null>(null);
+  const formState = useRef({dirty: false, busy: false});
+  const formNavigationState = useCallback((state: {dirty: boolean; busy: boolean}) => { formState.current = state; }, []);
+  const leaveForm = () => {
+    if (route !== "import") return true;
+    if (formState.current.busy) return false;
+    return !formState.current.dirty || window.confirm("Discard unsaved song changes?");
+  };
+  const navigate = (next: "library" | "import" | "player") => {
+    if (!leaveForm()) return;
+    formState.current = {dirty: false, busy: false};
+    setEditing(null); setRoute(next);
+  };
   const [help, setHelp] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -108,13 +121,13 @@ export function App() {
     <div className="app-shell">
       {route !== "player" && (
         <header className="topbar">
-          <button className="brand-button" onClick={() => setRoute("library")}>
+          <button className="brand-button" onClick={() => navigate("library")}>
             <Brand />
           </button>
           <nav aria-label="Primary navigation">
             <button
               onClick={() => {
-                setRoute("library");
+                navigate("library");
                 void refresh();
               }}
             >
@@ -123,7 +136,7 @@ export function App() {
             <button onClick={() => setHelp(true)}>
               <CircleHelp size={17} /> Guide
             </button>
-            {!browserMode && <button className="accent" onClick={() => setRoute("import")}>
+            {!browserMode && <button className="accent" disabled={route === "import"} onClick={() => navigate("import")}>
               <Plus size={17} /> Add song
             </button>}
           </nav>
@@ -141,9 +154,10 @@ export function App() {
         <LibraryPage
           songs={songs}
           loading={loading}
-          onAdd={() => browserMode ? document.querySelector<HTMLInputElement>('.bundle-import input')?.click() : setRoute("import")}
+          onAdd={() => browserMode ? document.querySelector<HTMLInputElement>('.bundle-import input')?.click() : navigate("import")}
           onOpen={(id) => void open(id)}
           onPractice={(id) => void open(id, true)}
+          onEdit={(id) => { void api.song(id).then(song => { setEditing(song); setRoute("import"); }).catch(e => setError(String(e))); }}
           onRate={async (id, readiness) => {
             const result = await api.saveReadiness(id, readiness);
             setSongs(old => old.map(song => song.id === id ? {...song, ...result} : song));
@@ -159,7 +173,11 @@ export function App() {
       )}
       {route === "import" && (
         <ImportPage
-          onCancel={() => setRoute("library")}
+          key={editing?.id ?? "new"}
+          song={editing ?? undefined}
+          onUpdate={update}
+          onNavigationState={formNavigationState}
+          onCancel={() => navigate("library")}
           onImported={(song) => {
             setSongs((s) => [song, ...s]);
             setCurrent(song);
@@ -192,7 +210,7 @@ export function App() {
             setRoute("library");
             void refresh();
           }}
-          onExpand={() => setRoute("player")}
+          onExpand={() => navigate("player")}
           onUpdate={update}
           onDelete={() => {
             setCurrent(null);

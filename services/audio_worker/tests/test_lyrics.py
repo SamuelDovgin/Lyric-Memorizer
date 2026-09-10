@@ -1,5 +1,12 @@
 from services.audio_worker.alignment import align_anchored_hypothesis, align_hypothesis
-from services.audio_worker.lrclib import apply_synced_lyrics, clean_track_title, parse_synced_lyrics
+from services.audio_worker.lrclib import (
+    apply_synced_lyrics,
+    clean_track_title,
+    parse_synced_lyrics,
+    score_synced_timing,
+    select_best_synced_candidate,
+    synced_candidate_key,
+)
 from services.audio_worker.lyrics import build_draft_alignment, parse_lyrics
 
 
@@ -108,6 +115,157 @@ def test_lrclib_parser_uses_blank_timestamp_as_end_boundary():
     assert clean_track_title("Doja Cat - Happy (Official Audio)", "Doja Cat") == "Happy"
 
 
+def test_lrclib_selection_prefers_the_candidate_matching_pasted_lyrics():
+    candidates = [
+        {
+            "id": 1,
+            "trackName": "Cards",
+            "artistName": "Doja Cat",
+            "albumName": "Cards",
+            "duration": 223,
+            "plainLyrics": "A completely different lyric",
+            "syncedLyrics": "[00:01.00]A completely different lyric",
+        },
+        {
+            "id": 2,
+            "trackName": "Cards",
+            "artistName": "Doja Cat",
+            "albumName": "Vie",
+            "duration": 223,
+            "plainLyrics": "A little more back and forth\nGotta just play your cards",
+            "syncedLyrics": "[00:01.00]A little more back and forth\n[00:04.00]Gotta just play your cards",
+        },
+    ]
+    selected = select_best_synced_candidate(
+        candidates,
+        "Cards",
+        "Doja Cat",
+        223,
+        "[Verse]\nA little more back and forth\nGotta just play your cards",
+    )
+    assert selected and selected["id"] == 2
+
+
+def test_lrclib_selection_uses_duration_when_lyrics_are_unavailable():
+    candidates = [
+        {"id": 1, "trackName": "Cards", "artistName": "Doja Cat", "duration": 223, "syncedLyrics": "[00:01.00]Cards"},
+        {"id": 2, "trackName": "Cards", "artistName": "Doja Cat", "duration": 225, "syncedLyrics": "[00:01.00]Cards"},
+    ]
+    selected = select_best_synced_candidate(candidates, "Cards", "Doja Cat", 225)
+    assert selected and selected["id"] == 2
+
+
+def test_lrclib_selection_prefers_more_granular_sync_when_metadata_ties():
+    candidates = [
+        {
+            "id": 38412426,
+            "trackName": "Cards",
+            "artistName": "Doja Cat",
+            "albumName": "Cards",
+            "duration": 223,
+            "syncedLyrics": "[00:21.75]A little more back and forth",
+        },
+        {
+            "id": 36653399,
+            "trackName": "Cards",
+            "artistName": "Doja Cat",
+            "albumName": "Vie (Dolby Atmos mix)",
+            "duration": 223,
+            "syncedLyrics": (
+                "[00:21.81]A little more back and forth\n"
+                "[00:57.40]Baby, be good to me"
+            ),
+        },
+    ]
+    selected = select_best_synced_candidate(candidates, "Cards", "Doja Cat", 223)
+    assert selected and selected["id"] == 36653399
+
+
+def test_lrclib_selection_prefers_the_candidate_with_better_audio_timing():
+    lyrics = "First line\nSecond line"
+    early = {
+        "id": 1,
+        "trackName": "Cards",
+        "artistName": "Doja Cat",
+        "duration": 10,
+        "plainLyrics": lyrics,
+        "syncedLyrics": "[00:00.00]First line\n[00:05.00]Second line",
+    }
+    aligned = {
+        **early,
+        "id": 2,
+        "syncedLyrics": "[00:00.50]First line\n[00:05.50]Second line",
+    }
+    hypothesis = [
+        {"text": "First", "start": .50, "end": .75},
+        {"text": "line", "start": .76, "end": 1.0},
+        {"text": "Second", "start": 5.50, "end": 5.85},
+        {"text": "line", "start": 5.86, "end": 6.1},
+    ]
+    early_fit = score_synced_timing(early["syncedLyrics"], lyrics, 10, hypothesis)
+    aligned_fit = score_synced_timing(aligned["syncedLyrics"], lyrics, 10, hypothesis)
+    assert aligned_fit["medianAbsoluteError"] < early_fit["medianAbsoluteError"]
+    selected = select_best_synced_candidate(
+        [early, aligned],
+        "Cards",
+        "Doja Cat",
+        10,
+        lyrics,
+        {synced_candidate_key(early): early_fit["score"], synced_candidate_key(aligned): aligned_fit["score"]},
+    )
+    assert selected and selected["id"] == 2
+
+
+def test_cards_prefers_the_finer_lrclib_timing_record_when_vocals_match_it():
+    lyrics = "A little more back and forth\nBaby, be good to me\nI don't care who's with me\nCalling me mon cherie"
+    cards = {
+        "id": 38412426,
+        "trackName": "Cards",
+        "artistName": "Doja Cat",
+        "albumName": "Cards",
+        "duration": 223,
+        "plainLyrics": lyrics,
+        "syncedLyrics": (
+            "[00:21.75]A little more back and forth\n"
+            "[00:57.31]Baby, be good to me, I don't care who's with me\n"
+            "[01:01.85]Calling me mon cherie"
+        ),
+    }
+    atmos = {
+        "id": 36653399,
+        "trackName": "Cards",
+        "artistName": "Doja Cat",
+        "albumName": "Vie (Dolby Atmos mix)",
+        "duration": 223,
+        "plainLyrics": lyrics,
+        "syncedLyrics": (
+            "[00:21.81]A little more back and forth\n"
+            "[00:57.40]Baby, be good to me\n"
+            "[00:59.60]I don't care who's with me\n"
+            "[01:01.75]Callin' me mon cherie"
+        ),
+    }
+    hypothesis = []
+    for text, start in (
+        ("A little more back and forth", 21.81),
+        ("Baby be good to me", 57.40),
+        ("I don't care who's with me", 59.60),
+        ("Callin me mon cherie", 61.75),
+    ):
+        for index, word in enumerate(text.split()):
+            word_start = start + index * 0.1
+            hypothesis.append({"text": word, "start": word_start, "end": word_start + 0.08})
+
+    fits = {
+        synced_candidate_key(candidate): score_synced_timing(candidate["syncedLyrics"], lyrics, 223, hypothesis)["score"]
+        for candidate in (cards, atmos)
+    }
+    selected = select_best_synced_candidate(
+        [cards, atmos], "Cards", "Doja Cat", 223, lyrics, fits
+    )
+    assert selected and selected["id"] == 36653399
+
+
 def test_accepts_genius_markdown_and_removes_recommendations():
     raw = """[Chorus]\\
 [First linked lyric](https://genius.com/example/First-linked-lyric)\\
@@ -134,3 +292,33 @@ def test_plain_and_markdown_section_headings():
     parsed = parse_lyrics("Verse 1:\nA lyric\n## Pre-Chorus\nAnother lyric\nChorus\nFinal lyric")
     assert [line.section for line in parsed] == ["Verse 1", "Pre-Chorus", "Chorus"]
     assert [line.occurrence for line in parsed] == [1, 2, 3]
+
+
+def test_audio_scored_candidate_cannot_lose_to_unvalidated_metadata():
+    candidate = dict(id=1, trackName='Song', artistName='Artist', duration=30,
+                     syncedLyrics='[00:01]hello world')
+    selected = select_best_synced_candidate(
+        [candidate, {**candidate, 'id': 2}], 'Song', 'Artist', 30,
+        timing_scores={'2': 0.85})
+    assert selected['id'] == 2
+
+
+def test_missing_line_opening_is_not_treated_as_a_late_onset():
+    fit = score_synced_timing('[00:01]First second third', 'First second third', 10,
+                              [{'text': 'second', 'start': 2}, {'text': 'third', 'start': 3}])
+    assert not fit['reliable']
+    assert fit['lineCoverage'] == 0
+
+
+def test_late_section_errors_reduce_score_even_when_median_is_perfect():
+    rows = ['alpha one', 'bravo two', 'charlie three', 'delta four', 'echo five', 'foxtrot six']
+    synced = '\n'.join(f'[00:{i * 5 + 1:02}]{row}' for i, row in enumerate(rows))
+    words = [{'text': word, 'start': i * 5 + 1 + j * .15, 'confidence': .9}
+             for i, row in enumerate(rows) for j, word in enumerate(row.split())]
+    good = score_synced_timing(synced, '\n'.join(rows), 35, words)
+    drifted = [{**word, 'start': word['start'] + (2 if i >= 8 else 0)} for i, word in enumerate(words)]
+    bad = score_synced_timing(synced, '\n'.join(rows), 35, drifted)
+    assert good['reliable'] and bad['reliable']
+    assert bad['medianAbsoluteError'] == 0
+    assert bad['p90AbsoluteError'] == 2
+    assert good['score'] > bad['score']

@@ -22,6 +22,8 @@ export interface LyricLine {
   end: number;
   confidence: number;
   verified: boolean;
+  timingQuality?: "verified" | "supported" | "needs_review" | "untimed";
+  timingEvidence?: {reasons: string[]; engine?: string; model?: string; passageId?: string; referenceDeviationSeconds?: number | null};
   timingSource?: "lrclib_synced_lyrics" | string;
   wordTimingCoverage?: number;
   wordTimingConfidence?: number;
@@ -57,6 +59,7 @@ export interface Song {
   instrumentalUrl: string | null;
   lines: LyricLine[];
   alignmentRevision?: number;
+  alignmentRun?: {engine: string; outcome: "applied" | "partial" | "unchanged"; reviewCount: number; revisedCount: number; recoveredCount: number; accuracyValidated: boolean; inputRevision?: number; engineConfiguration?: {language?: string}; snapshotPath?: string; candidateArtifactPath?: string};
   capabilities?: { playable: boolean; stems: boolean; lineTiming: boolean };
 }
 
@@ -75,6 +78,9 @@ export interface ImportValues {
 export interface LyricSyncPreview {
   found: boolean;
   message: string;
+  catalogId?: number;
+  albumName?: string;
+  catalogDuration?: number;
   trackName?: string;
   artistName?: string;
   matchedLines?: number;

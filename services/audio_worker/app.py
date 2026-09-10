@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import os
+from copy import deepcopy
+import json
+import re
 import math
 import shutil
 import subprocess
@@ -8,6 +11,7 @@ import sys
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from typing import Callable
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -38,11 +42,23 @@ from .database import (
     save_song,
     save_youtube_download,
 )
+from .forced_alignment_job import execute_forced_alignment
+from . import database
+from .timing_gaps import fill_audio_gaps, merge_catalog_gaps, usable as timing_usable
 from .listening import router as listening_router, init_listening
 from .genius_source import router as genius_router
 from .lyrics import build_draft_alignment, redistribute_tokens
 from .rehearsal import router as rehearsal_router, migrate, public_song
-from .lrclib import apply_synced_lyrics, fetch_synced_lyrics, parse_synced_lyrics
+from .lrclib import (
+    apply_synced_lyrics,
+    clean_track_title,
+    fetch_synced_candidates,
+    fetch_synced_lyrics,
+    parse_synced_lyrics,
+    score_synced_timing,
+    select_best_synced_candidate,
+    synced_candidate_key,
+)
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -202,20 +218,141 @@ def update_status(song_id: str, status: str, *, message: str | None = None) -> N
     save_song(document, paths, now_iso())
 
 
-def apply_catalog_timing(document: dict) -> bool:
+class CatalogTimingUnavailable(RuntimeError):
+    def __init__(self, message: str, candidates: list[dict]):
+        super().__init__(message)
+        self.candidates = candidates
+
+
+def apply_catalog_timing(document: dict, audio_path: str | None = None, validate_audio: bool = False, on_progress: Callable[[str], None] | None = None) -> bool:
     """Apply LRCLIB timing to canonical lyrics without replacing their text."""
-    catalog = fetch_synced_lyrics(document["title"], document.get("artist", ""), document.get("duration"))
-    if not catalog or not catalog.get("syncedLyrics"):
+    candidates = fetch_synced_candidates(
+        document["title"],
+        document.get("artist", ""),
+        document.get("duration"),
+    )
+    if not candidates:
+        if validate_audio:
+            raise RuntimeError("LRCLIB returned no synchronized timing files for this song.")
         return False
-    document["lines"], coverage = apply_synced_lyrics(
+
+    timing_scores: dict[str, float] = {}
+    timing_details: dict[str, dict[str, float]] = {}
+    analysis_error: Exception | None = None
+    analysis_completed = False
+    analysis_model = None
+    if validate_audio and audio_path and document.get("lyrics", "").strip():
+        primary = os.environ.get("LYRIC_TIMING_MODEL", "base")
+        fallback = os.environ.get("LYRIC_TIMING_FALLBACK_MODEL", "small")
+        models = list(dict.fromkeys([primary, fallback]))
+        for attempt, model in enumerate(models):
+            if on_progress:
+                on_progress("Checking vocal timing…" if not attempt else
+                            "The quick check was inconclusive. Running a more accurate vocal check; first use may download the model…")
+            try:
+                hypothesis = transcribe_vocals(audio_path, model, prompt=document["lyrics"])
+                analysis_completed = True
+                current_details = {}
+                current_scores = {}
+                for candidate in candidates:
+                    fit = score_synced_timing(
+                        str(candidate.get("syncedLyrics") or ""), document["lyrics"],
+                        float(document.get("duration") or candidate.get("duration") or 180), hypothesis)
+                    key = synced_candidate_key(candidate)
+                    current_details[key] = fit
+                    if fit.get("reliable", False):
+                        current_scores[key] = fit["score"]
+                # Each attempt compares every candidate against the same analyzer.
+                timing_details, timing_scores = current_details, current_scores
+                analysis_model = model
+                if current_scores and select_best_synced_candidate(
+                    candidates, document["title"], document.get("artist", ""),
+                    document.get("duration"), document["lyrics"], current_scores):
+                    break
+            except Exception as exc:
+                analysis_error = exc
+
+    if validate_audio and not timing_scores:
+        if not analysis_completed and analysis_error:
+            raise RuntimeError("The local vocal analyzer could not run: " + str(analysis_error)) from analysis_error
+        raise CatalogTimingUnavailable("The vocal checks could not confidently match a catalog to this recording.", candidates)
+
+    catalog = select_best_synced_candidate(
+        candidates,
+        document["title"],
+        document.get("artist", ""),
+        document.get("duration"),
+        document.get("lyrics", ""),
+        timing_scores or None,
+    )
+    if not catalog or not catalog.get("syncedLyrics"):
+        if validate_audio:
+            raise CatalogTimingUnavailable("No LRCLIB candidate passed the recording and song matching checks.", candidates)
+        return False
+    aligned_lines, coverage = apply_synced_lyrics(
         document["lines"], catalog["syncedLyrics"], document["duration"]
     )
+    if coverage < 0.55:
+        if validate_audio:
+            raise RuntimeError(f"The selected LRCLIB file matched only {coverage:.0%} of the lyric words (55% required).")
+        return False
+    document["lines"] = [old if old.get("verified") else new
+                         for old, new in zip(document["lines"], aligned_lines)]
+    supplemental_ids = []
+    seen_synced = {catalog["syncedLyrics"]}
+    for candidate in candidates:
+        if all(map(timing_usable, document["lines"])):
+            break
+        if candidate.get("syncedLyrics") in seen_synced:
+            continue
+        seen_synced.add(candidate.get("syncedLyrics"))
+        if synced_candidate_key(candidate) == synced_candidate_key(catalog):
+            continue
+        if not select_best_synced_candidate([candidate], document["title"], document.get("artist", ""),
+                                            document.get("duration"), document.get("lyrics", ""), timing_scores or None):
+            continue
+        merged = merge_catalog_gaps(document["lines"], candidate["syncedLyrics"], document["duration"], candidate.get("id"))
+        if sum(map(timing_usable, merged)) > sum(map(timing_usable, document["lines"])):
+            supplemental_ids.append(candidate.get("id"))
+            document["lines"] = merged
+    gap_error = None
+    if validate_audio and audio_path and not all(map(timing_usable, document["lines"])):
+        try:
+            document["lines"] = fill_audio_gaps(document["lines"], audio_path, document["duration"],
+                                                os.environ.get("LYRIC_TIMING_GAP_MODEL", "small"), on_progress)
+        except Exception as exc:
+            gap_error = str(exc)
+    missing = sum(not timing_usable(line) for line in document["lines"])
     document["alignmentSource"] = {
+        "supplementalCatalogIds": supplemental_ids,
+        "missingLineCount": missing,
+        "lineCoverage": round(1 - missing / max(1, len(document["lines"])), 3),
+        "gapAudioError": gap_error,
         "kind": "lrclib",
+        "catalogId": catalog.get("id"),
+        "albumName": catalog.get("albumName"),
+        "catalogDuration": catalog.get("duration"),
         "trackName": catalog.get("trackName"),
         "artistName": catalog.get("artistName"),
         "coverage": round(coverage, 3),
+        "audioValidated": synced_candidate_key(catalog) in timing_scores,
+        "timingModel": analysis_model,
+        "timingMethod": "vocal_onset_error_v2" if timing_scores else "metadata",
+        "timingCandidates": [{"catalogId": candidate.get("id"),
+                              **timing_details.get(synced_candidate_key(candidate), {})}
+                             for candidate in candidates],
     }
+    ranked_scores = sorted(timing_scores.values(), reverse=True)
+    document["alignmentSource"]["timingSelectionUncertain"] = (
+        len(ranked_scores) > 1 and ranked_scores[0] - ranked_scores[1] < 0.05
+    )
+    selected_fit = timing_details.get(synced_candidate_key(catalog))
+    if selected_fit:
+        document["alignmentSource"].update({
+            "timingScore": selected_fit.get("score"),
+            "timingOffset": selected_fit.get("medianOffset"),
+            "timingError": selected_fit.get("medianAbsoluteError"),
+        })
     return coverage >= 0.55
 
 
@@ -351,19 +488,110 @@ def stage_youtube_download(download_id: str, youtube_url: str) -> None:
             message = exc.stderr.strip().splitlines()[-1]
         document.update(status="FAILED", progress=0, message=message)
         save_youtube_download(document, {}, now_iso())
-def align_song(song_id: str, job_id: str, refine_words: bool = False) -> None:
+def recover_timing_without_catalog(document: dict, audio_path: str | None, reason: str, on_progress, candidates: list[dict] | None = None) -> str:
+    """Keep saved anchors and try audio even when catalog selection is unavailable."""
+    before = sum(map(timing_usable, document["lines"]))
+    # Re-map the already saved source when it agrees with existing anchors.
+    # This repairs parser/repetition mistakes without selecting an unvalidated new catalog.
+    source_id = document.get("alignmentSource", {}).get("catalogId")
+    for candidate in candidates or []:
+        if source_id is None or candidate.get("id") != source_id:
+            continue
+        remapped, _ = apply_synced_lyrics(document["lines"], candidate["syncedLyrics"], document["duration"])
+        shared = [i for i, line in enumerate(document["lines"]) if timing_usable(line) and timing_usable(remapped[i])]
+        agreement = sum(abs(document["lines"][i]["start"] - remapped[i]["start"]) <= .75 for i in shared)
+        if len(shared) < 3 or agreement / len(shared) < .9:
+            continue
+        remapped = [old if old.get("verified") or timing_usable(old) and (old.get("timingSource") != "lrclib_synced_lyrics" or not timing_usable(new)) else new
+                    for old, new in zip(document["lines"], remapped)]
+        if sum(map(timing_usable, remapped)) > before:
+            document["lines"] = remapped
+    catalog_added = sum(map(timing_usable, document["lines"])) - before
+    missing_before = len(document["lines"]) - before
+    if not missing_before:
+        return f"{reason} All saved lines already have usable timing; existing timings kept."
+    if not audio_path:
+        raise RuntimeError(f"{reason} Audio recovery could not run because no local recording is available. Existing timings kept.")
+    on_progress(f"{reason} Checking missing lines directly against the recording…")
+    try:
+        recovered = fill_audio_gaps(document["lines"], audio_path, document["duration"],
+                                    os.environ.get("LYRIC_TIMING_GAP_MODEL", "small"), on_progress)
+    except Exception as exc:
+        raise RuntimeError(f"{reason} Audio recovery could not finish: {exc}. Existing timings kept.") from exc
+    added = sum(map(timing_usable, recovered)) - before
+    if not added:
+        if before:
+            return f"Timing check finished. No additional reliable timings found; {before} existing line timings kept. {reason}"
+        raise RuntimeError(f"{reason} Audio recovery found no reliable line timings. "
+                           f"{missing_before} line(s) still need timing review.")
+    document["lines"] = recovered
+    missing = len(recovered) - before - added
+    document["alignmentSource"] = {
+        **document.get("alignmentSource", {"kind": "audio"}),
+        "catalogFallbackReason": reason,
+        "gapTimingMethod": "audio_gap_match",
+        "recoveredLineCount": added,
+        "missingLineCount": missing,
+        "lineCoverage": round(1 - missing / max(1, len(recovered)), 3),
+        "gapAudioError": None,
+    }
+    return f"Recovered {added} missing line timing(s): {catalog_added} from the saved catalog and {added - catalog_added} from audio. {reason}"
+
+
+def align_song(song_id: str, job_id: str, refine_words: bool = False, engine: str | None = None, language: str = "en") -> None:
     found = get_song(song_id)
     if not found:
         return
     document, paths = found
     revision = document.get("alignmentRevision", 0)
+    audio_validated = False
+    recovery_message = None
     job = dict(id=job_id, songId=song_id, kind="alignment", status="RUNNING", progress=.1,
                message="Checking synchronized lyrics", updatedAt=now_iso())
     save_job(job)
     try:
+        selected_engine = engine or os.environ.get("LYRIC_ALIGNMENT_ENGINE", "legacy")
+        if selected_engine not in ("forced", "legacy"):
+            raise ValueError("Unknown alignment engine")
+        if selected_engine == "forced" and not refine_words:
+            def forced_progress(message):
+                job.update(message=message, engine="forced", updatedAt=now_iso())
+                save_job(job)
+            forced_progress("Preparing recording and reference points…")
+            result = execute_forced_alignment(document, paths, job_id, database.DATA_DIR, forced_progress, language)
+            document["lines"] = result["lines"]
+            document["alignmentRun"] = result["alignmentRun"]
+            document["alignmentRevision"] = revision + 1
+            document["status"] = "READY_NEEDS_REVIEW"
+            run = result["alignmentRun"]
+            review = run["reviewCount"]
+            if run["outcome"] == "unchanged":
+                message = f"Forced alignment finished. No supported timing changes; {review} lines need review."
+            else:
+                message = f"Forced alignment updated {run['revisedCount']} lines; {review} lines need review."
+            message += " Audio synchronization still needs a listening check."
+            document["statusMessage"] = message
+            save_song(document, paths, now_iso(), expected_revision=revision)
+            job.update(status="COMPLETE", progress=1, message=message, outcome=run["outcome"], engine="forced")
+            save_job(job)
+            return
+        job["engine"] = "legacy"
         if not refine_words:
-            if not apply_catalog_timing(document):
-                raise RuntimeError("No reliable line sync found. Mark line starts manually, or create stems and refine words.")
+            job.update(progress=.15, message="Comparing synchronized candidates with the local recording")
+            save_job(job)
+            def timing_progress(message: str) -> None:
+                job.update(message=message, updatedAt=now_iso())
+                save_job(job)
+            audio_path = paths.get("vocals") or paths.get("original")
+            saved_document = deepcopy(document)
+            try:
+                if not apply_catalog_timing(document, audio_path, validate_audio=True, on_progress=timing_progress):
+                    raise RuntimeError("No reliable catalog timing was available.")
+            except Exception as exc:
+                # A failed attempt must not leave partial catalog changes behind.
+                document = saved_document
+                recovery_message = recover_timing_without_catalog(document, audio_path, str(exc), timing_progress, getattr(exc, "candidates", None))
+            audio_validated = not recovery_message and bool(document.get("alignmentSource", {}).get("audioValidated"))
         else:
             vocals = paths.get("vocals")
             if not vocals:
@@ -378,11 +606,20 @@ def align_song(song_id: str, job_id: str, refine_words: bool = False) -> None:
             document["lines"] = align_anchored_hypothesis(document["lines"], hypothesis) if anchored else align_hypothesis(document["lines"], hypothesis)
         document["alignmentRevision"] = revision + 1
         document["status"] = "READY_NEEDS_REVIEW"
-        document["statusMessage"] = "Timing updated. Check your important passages."
+        document["statusMessage"] = recovery_message or (
+            ("Audio timing candidates were close; review the selected timing."
+             if document.get("alignmentSource", {}).get("timingSelectionUncertain")
+             else "Best line timing selected against the local recording.")
+            if audio_validated
+            else "Timing updated. Check your important passages."
+        )
+        missing = sum(not timing_usable(line) for line in document["lines"])
+        if missing:
+            document["statusMessage"] += f" {missing} line(s) still need timing; open Timing to review."
         save_song(document, paths, now_iso(), expected_revision=revision)
         job.update(status="COMPLETE", progress=1, message=document["statusMessage"])
     except Exception as exc:
-        job.update(status="FAILED", message=str(getattr(exc, "detail", exc)))
+        job.update(status="FAILED", outcome="failed", message=str(getattr(exc, "detail", exc)))
     job["updatedAt"] = now_iso()
     save_job(job)
 
@@ -451,7 +688,7 @@ def health() -> dict:
 def lyric_sync_preview(request: LyricSyncPreviewRequest) -> dict:
     if not request.title.strip():
         raise HTTPException(422, "Enter the song title first")
-    catalog = fetch_synced_lyrics(request.title, request.artist, request.duration)
+    catalog = fetch_synced_lyrics(request.title, request.artist, request.duration, request.lyrics)
     if not catalog or not catalog.get("syncedLyrics"):
         return {"found": False, "message": "No reliable synchronized entry found"}
     catalog_lyrics = str(catalog.get("plainLyrics") or "").strip()
@@ -465,6 +702,9 @@ def lyric_sync_preview(request: LyricSyncPreviewRequest) -> dict:
         lyric_lines = [line for line in catalog_lyrics.splitlines() if line.strip()]
         return {
             "found": True,
+            "catalogId": catalog.get("id"),
+            "albumName": catalog.get("albumName"),
+            "catalogDuration": catalog.get("duration"),
             "trackName": catalog.get("trackName"),
             "artistName": catalog.get("artistName"),
             "matchedLines": len(lyric_lines),
@@ -479,6 +719,9 @@ def lyric_sync_preview(request: LyricSyncPreviewRequest) -> dict:
     matched = sum(1 for line in aligned if line.get("timingSource") == "lrclib_synced_lyrics")
     return {
         "found": coverage >= 0.55,
+        "catalogId": catalog.get("id"),
+        "albumName": catalog.get("albumName"),
+        "catalogDuration": catalog.get("duration"),
         "trackName": catalog.get("trackName"),
         "artistName": catalog.get("artistName"),
         "matchedLines": matched,
@@ -531,6 +774,58 @@ def song(song_id: str) -> dict:
     if not found:
         raise HTTPException(404, "Song not found")
     return public_song(found[0])
+
+
+class SongEdit(BaseModel):
+    title: str = Field(min_length=1, max_length=500)
+    artist: str = Field(default="", max_length=500)
+    lyrics: str = Field(min_length=1, max_length=100000)
+    revision: int = 0
+
+
+@app.post("/api/songs/{song_id}/refresh-preview")
+def refresh_song_preview(song_id: str) -> dict:
+    found = get_song(song_id)
+    if not found:
+        raise HTTPException(404, "Song not found")
+    document = found[0]
+    try:
+        url = validate_youtube_url(document.get("sourceUrl") or "")
+        result = subprocess.run(
+            [*yt_dlp_command(), "--no-config", "--no-playlist", "--skip-download",
+             "--dump-single-json", "--socket-timeout", "20", "--", url],
+            capture_output=True, text=True, check=True, timeout=60)
+        metadata = json.loads(result.stdout)
+        artist = metadata.get("artist") or metadata.get("uploader", "")
+        artist = re.sub(r"\s*-\s*Topic$", "", artist)
+        title = clean_track_title(metadata.get("track") or metadata.get("title", ""), artist)
+        preview = lyric_sync_preview(LyricSyncPreviewRequest(
+            title=title, artist=artist, duration=document.get("duration")))
+        if not preview.get("lyrics", "").strip():
+            raise ValueError("No lyrics found for this YouTube source. Enter the title and lyrics manually.")
+        return {"title": title, "artist": artist, "lyrics": preview["lyrics"]}
+    except Exception as exc:
+        raise HTTPException(422, "Could not refresh lyrics from the YouTube source: " + str(exc)) from exc
+
+
+@app.put("/api/songs/{song_id}/edit")
+def edit_song(song_id: str, request: SongEdit) -> dict:
+    found = get_song(song_id)
+    if not found:
+        raise HTTPException(404, "Song not found")
+    document, paths = found
+    if not request.title.strip() or not request.lyrics.strip():
+        raise HTTPException(422, "Title and lyrics cannot be blank")
+    if request.lyrics != document.get("lyrics"):
+        revision = request.revision + 1
+        document["lines"] = build_draft_alignment(request.lyrics, document["duration"], f"{song_id}_r{revision}")
+        document.pop("alignmentSource", None)
+        document["status"] = "READY_NEEDS_REVIEW"
+        document["statusMessage"] = "Lyrics updated. Redo timings before relying on line sync."
+    document.update(title=request.title.strip(), artist=request.artist.strip(), lyrics=request.lyrics,
+                    alignmentRevision=request.revision + 1)
+    save_song(document, paths, now_iso(), expected_revision=request.revision)
+    return public_song(document)
 
 
 @app.post("/api/songs/import", status_code=201)
@@ -669,10 +964,14 @@ def upload_stems(song_id: str, vocals: UploadFile = File(...), instrumental: Upl
 
 
 @app.post("/api/songs/{song_id}/align", status_code=202)
-def start_alignment(song_id: str, background_tasks: BackgroundTasks, refine_words: bool = False) -> dict:
+def start_alignment(song_id: str, background_tasks: BackgroundTasks, refine_words: bool = False, engine: str | None = None, language: str = "en") -> dict:
     found = get_song(song_id)
     if not found:
         raise HTTPException(404, "Song not found")
+    if engine is not None and engine not in ("forced", "legacy"):
+        raise HTTPException(422, "Choose forced or legacy timing")
+    if language not in ("en", "es", "fr", "de", "it", "pt", "ja", "ko", "zh"):
+        raise HTTPException(422, "Unsupported alignment language")
     if refine_words and not found[1].get("vocals"):
         raise HTTPException(409, "Create vocal stems before refining words")
     job_id = f"job_{uuid.uuid4().hex}"
@@ -680,7 +979,7 @@ def start_alignment(song_id: str, background_tasks: BackgroundTasks, refine_word
         "id": job_id, "songId": song_id, "kind": "alignment", "status": "QUEUED",
         "progress": 0, "message": "Waiting to start", "updatedAt": now_iso(),
     })
-    background_tasks.add_task(align_song, song_id, job_id, refine_words)
+    background_tasks.add_task(align_song, song_id, job_id, refine_words, engine, language)
     return {"jobId": job_id}
 
 
@@ -690,6 +989,32 @@ def job(job_id: str) -> dict:
     if not result:
         raise HTTPException(404, "Job not found")
     return result
+
+
+@app.post("/api/songs/{song_id}/alignment/restore")
+def restore_alignment(song_id: str, revision: int) -> dict:
+    found = get_song(song_id)
+    if not found:
+        raise HTTPException(404, "Song not found")
+    document, paths = found
+    run = document.get("alignmentRun", {})
+    if document.get("alignmentRevision", 0) != revision or run.get("inputRevision", -2) + 1 != revision:
+        raise HTTPException(409, "The song changed after alignment. Keep your newer edits; automatic undo is unavailable.")
+    run_id = run.get("runId", "")
+    if not re.fullmatch(r"job_[a-f0-9]+", run_id):
+        raise HTTPException(409, "No alignment snapshot is available")
+    snapshot = database.DATA_DIR / "alignment-runs" / run_id / "before.json"
+    if not snapshot.is_file():
+        raise HTTPException(409, "The alignment snapshot is unavailable")
+    before = json.loads(snapshot.read_text())
+    if [(l["id"], l["text"]) for l in before["lines"]] != [(l["id"], l["text"]) for l in document["lines"]]:
+        raise HTTPException(409, "Lyrics changed; cannot restore this snapshot")
+    document["lines"] = before["lines"]
+    document.pop("alignmentRun", None)
+    document["alignmentRevision"] = revision + 1
+    document["statusMessage"] = "Previous line timings restored."
+    save_song(document, paths, now_iso(), expected_revision=revision)
+    return document
 
 
 @app.put("/api/songs/{song_id}/alignment")
@@ -721,6 +1046,14 @@ def update_alignment(song_id: str, update: AlignmentUpdate) -> dict:
             confidence=1.0 if supplied.verified else .18 if changed_bounds else current.get("confidence", 0.18),
             tokens=[token.model_dump() for token in supplied.tokens],
         )
+        if supplied.verified:
+            current.update(timingQuality="verified", timingSource="manual")
+            current.pop("timingEvidence", None)
+            current.pop("planningReference", None)
+        elif changed_bounds:
+            current.update(timingQuality="needs_review", timingSource="draft")
+            current.pop("timingEvidence", None)
+            current.pop("planningReference", None)
         if supplied.section is not None:
             if not supplied.section.strip():
                 raise HTTPException(422, "Section name cannot be blank")

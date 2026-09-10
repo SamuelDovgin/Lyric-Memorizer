@@ -23,6 +23,7 @@ const readinessLevels = [
 interface Props {
   songs: Song[];
   onRate: (id: string, readiness: number) => Promise<void>;
+  onEdit: (id: string) => void;
   onDelete: (id: string) => Promise<void>;
   loading: boolean;
   onAdd: () => void;
@@ -37,6 +38,7 @@ export function LibraryPage({
   onPractice,
   onRate,
   onDelete,
+  onEdit,
 }: Props) {
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -158,6 +160,7 @@ export function LibraryPage({
                       ? `Continue · ${formatTime(position)}`
                       : "Play song"}
                   </button>
+                  <button disabled={busy[song.id]} aria-label={`Edit ${song.title}`} onClick={() => onEdit(song.id)}>Edit</button>
                   <button className="delete-song" disabled={busy[song.id]}
                     aria-label={`Delete ${song.title}`}
                     onClick={() => {

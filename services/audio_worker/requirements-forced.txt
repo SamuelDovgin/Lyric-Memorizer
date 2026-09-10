@@ -1,0 +1,5 @@
+# Isolated environment; tested on Apple Silicon with Python 3.11.
+stable-ts==2.19.1
+openai-whisper==20250625
+torch==2.11.0
+torchaudio==2.11.0

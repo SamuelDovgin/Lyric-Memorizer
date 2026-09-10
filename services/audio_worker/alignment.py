@@ -328,7 +328,7 @@ def transcribe_vocals(path: str, model_name: str = "small", prompt: str = "") ->
         audio,
         detect_disfluencies=False,
         initial_prompt=prompt[:4000] or None,
-        condition_on_previous_text=True,
+        condition_on_previous_text=False,
     )
     words = []
     for segment in result.get("segments", []):

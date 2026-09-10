@@ -7,9 +7,9 @@ import type { Song } from "../types";
 
 const mock = vi.hoisted(() => ({
   state: {status: "paused", position: 0, duration: 20, pass: 0, error: null},
-  transport: {seek: vi.fn(), play: vi.fn(), pause: vi.fn(), setTransition: vi.fn(), subscribe: vi.fn(() => () => {}), getSnapshot: () => ({position: mock.state.position})},
+  transport: {seek: vi.fn(), play: vi.fn(), pause: vi.fn(), setTransition: vi.fn(), setRepeat: vi.fn(), subscribe: vi.fn(() => () => {}), getSnapshot: () => ({position: mock.state.position})},
 }));
-vi.mock("../hooks/useRehearsalPlayer", () => ({useRehearsalPlayer: () => ({...mock.state, transport: mock.transport})}));
+vi.mock("../hooks/useListeningPlayer", () => ({useListeningPlayer: () => ({...mock.state, transport: mock.transport})}));
 vi.mock("../hooks/useListenCounts", () => ({useListenCounts: () => ({counts: {}, record: vi.fn(), error: ""})}));
 const song: Song = {
   id: "test", title: "Test song", artist: "", lyrics: "", duration: 20, status: "READY", statusMessage: "", createdAt: "", originalUrl: "/audio.wav", vocalsUrl: null, instrumentalUrl: null,
@@ -23,8 +23,22 @@ beforeEach(() => {
   mock.state = {status: "paused", position: 0, duration: 20, pass: 0, error: null};
   window.matchMedia = vi.fn().mockReturnValue({matches: true});
   HTMLElement.prototype.scrollTo = vi.fn();
+  HTMLElement.prototype.scrollIntoView = vi.fn();
 });
 afterEach(cleanup);
+
+test("keeps the active section centered in the song map", () => {
+  const view = render(<PlayerPage {...props}/>);
+  const first = document.querySelector<HTMLButtonElement>('[data-section-id="verse0"]');
+  expect(first?.scrollIntoView).toHaveBeenCalledWith({behavior: "instant", block: "center", inline: "center"});
+
+  vi.mocked(HTMLElement.prototype.scrollIntoView).mockClear();
+  mock.state.position = 7;
+  view.rerender(<PlayerPage {...props}/>);
+
+  const second = document.querySelector<HTMLButtonElement>('[data-section-id="verse1"]');
+  expect(second?.scrollIntoView).toHaveBeenCalledWith({behavior: "instant", block: "center", inline: "center"});
+});
 
 test("loop buttons jump, share selection, switch sections and toggle off", () => {
   render(<PlayerPage {...props}/>);
@@ -68,7 +82,7 @@ test("library continues the saved section and position after the player is close
   fireEvent.click(screen.getByRole("button", {name: "Back to library"}));
   view.unmount();
   const onPractice = vi.fn();
-  const library = render(<LibraryPage songs={[song]} loading={false} onPractice={onPractice} onOpen={vi.fn()} onAdd={vi.fn()} onDelete={vi.fn()} onRate={vi.fn()}/>);
+  const library = render(<LibraryPage onEdit={vi.fn()} songs={[song]} loading={false} onPractice={onPractice} onOpen={vi.fn()} onAdd={vi.fn()} onDelete={vi.fn()} onRate={vi.fn()}/>);
   fireEvent.click(screen.getByRole("button", {name: "Continue Verse 2"}));
   expect(onPractice).toHaveBeenCalledWith(song.id);
   library.unmount();
@@ -154,4 +168,16 @@ test("odd verse halves divide without overlap and resume the saved range", () =>
   render(<PlayerPage {...props} song={longSong} resumeFocus openRequest={1}/>);
   expect(mock.transport.play).toHaveBeenLastCalledWith(10);
   expect(mock.transport.setTransition).toHaveBeenLastCalledWith(expect.objectContaining({start: 9, exit: 14}));
+});
+
+test("shows incomplete timing before a lyric is clicked and never seeks to its draft", () => {
+  const incomplete = {...song, lines: song.lines.map((line, i) => i ? line : {...line, confidence: .18, verified: false})};
+  render(<PlayerPage {...props} song={incomplete}/>);
+  expect(screen.getByText(/1 of 2 lines need timing/)).toBeInTheDocument();
+  expect(screen.getByText("Timing needed")).toBeInTheDocument();
+  mock.transport.seek.mockClear();
+  fireEvent.click(screen.getByRole("button", {name: "Go to line 1: Lyric 0"}));
+  expect(mock.transport.seek).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", {name: "Review timing"}));
+  expect(screen.getByText("Timing & sections")).toBeInTheDocument();
 });

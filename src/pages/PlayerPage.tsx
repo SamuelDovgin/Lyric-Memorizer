@@ -1,8 +1,11 @@
+import { AlignmentOptions, type AlignmentChoice } from "../components/AlignmentOptions";
+import { useFloatingLyrics } from "../hooks/useFloatingLyrics";
+import { useListeningMediaSession } from "../hooks/useListeningMediaSession";
 import { browserMode } from "../lib/browserLibrary";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ArrowLeft, ArrowRight, Clock3, Headphones, Maximize, Pause, Play, RotateCcw, Settings2, SkipBack, SkipForward, Shuffle, Repeat, Repeat1 } from "lucide-react";
 import type { SectionOccurrence, Song } from "../types";
-import { useRehearsalPlayer } from "../hooks/useRehearsalPlayer";
+import { useListeningPlayer } from "../hooks/useListeningPlayer";
 import { useListenCounts } from "../hooks/useListenCounts";
 import { readLocal, writeLocal } from "../hooks/usePracticeStore";
 import { ListenTracker } from "../lib/listenTracker";
@@ -21,10 +24,12 @@ interface Props {
   onLibrary: () => void; onExpand: () => void; onUpdate: (song: Song) => void; onDelete: () => void;
 }
 export function PlayerPage({song, minimized, onLibrary, onExpand, onUpdate, onDelete, autoPlay, resumeFocus, openRequest, shuffle, repeat, queueBusy, queueError, onShuffle, onRepeat, onNextSong, onPreviousSong, onEnded}: Props) {
-  const player = useRehearsalPlayer(song.originalUrl ? [song.originalUrl] : [song.vocalsUrl, song.instrumentalUrl].filter(Boolean) as string[], !song.originalUrl);
+  const player = useListeningPlayer(song.originalUrl ? [song.originalUrl] : [song.vocalsUrl, song.instrumentalUrl].filter(Boolean) as string[]);
   const {transport} = player;
   const playing = player.status === "playing";
   const sections = useMemo(() => getSections(song), [song]);
+  const timingReview = song.lines.filter(line => !line.verified && line.timingQuality === "needs_review").length;
+  const missingTiming = song.lines.filter(line => !usable(line)).length;
   const eligible = useMemo(() => sections.filter(s => s.lineIds.every(id => {const line = song.lines.find(l => l.id === id); return line && usable(line); })), [sections, song]);
   const [loopId, setLoopId] = useState<string | null>(null);
   const [practiceRange, setPracticeRange] = useState<[number, number] | null>(null);
@@ -38,6 +43,8 @@ export function PlayerPage({song, minimized, onLibrary, onExpand, onUpdate, onDe
     return first && last ? {...loopParent, lineIds, start: first.start, end: last.end,
       name: `${loopParent.name} · lines ${practiceRange[0] + 1}–${practiceRange[1] + 1}`} : loopParent;
   }, [loopParent, practiceRange, song.lines]);
+  const floatingLyrics = useFloatingLyrics(song, transport, loopSection?.name);
+  useListeningMediaSession(song, transport, onNextSong, onPreviousSong);
   const saveProgress = useRef(() => {});
   saveProgress.current = () => {
     const position = transport.getSnapshot().position;
@@ -56,9 +63,11 @@ export function PlayerPage({song, minimized, onLibrary, onExpand, onUpdate, onDe
   const visiblePins = useMemo(() => showEmojis ? pinsAtDensity(emojiCandidates, emojiDensity) : [], [emojiCandidates, emojiDensity, showEmojis]);
   const [notice, setNotice] = useState("");
   const [geniusUrl, setGeniusUrl] = useState("");
+  const [alignmentChoice, setAlignmentChoice] = useState<AlignmentChoice>({engine: song?.alignmentRun?.engine === "forced" ? "forced" : "legacy", language: song?.alignmentRun?.engineConfiguration?.language ?? "en"});
   const [busy, setBusy] = useState(false);
   const stage = useRef<HTMLDivElement>(null);
   const root = useRef<HTMLDivElement>(null);
+  const sectionMap = useRef<HTMLElement>(null);
   const active = activeLine(song.lines, player.position);
   // Hold the preceding line through instrumental gaps rather than highlighting unsung lyrics early.
   const displayed = active >= 0 ? active : Math.max(0, song.lines.reduce((last, l, i) => usable(l) && l.start <= player.position ? i : last, -1));
@@ -98,16 +107,9 @@ export function PlayerPage({song, minimized, onLibrary, onExpand, onUpdate, onDe
     }
   }, [song.id, song.alignmentRevision]);
   useEffect(() => {
-    if (player.status !== "playing") { transport.setTransition(null); return; }
-    if (!loopSection) { transport.setTransition(null); return; }
-    // Schedule on the audio clock; recover if a suspended tab missed the boundary.
-    if (player.position >= loopSection.end) {
-      tracker.current.reset();
-      transport.seek(loopSection.start);
-      return;
-    }
-    transport.setTransition({id: loopSection.id, start: loopSection.start, exit: loopSection.end, gap: 0, clicks: []});
-  }, [transport, loopSection, player.status, player.pass, player.position]);
+    transport.setTransition(loopSection ? {id: loopSection.id, start: loopSection.start, exit: loopSection.end, gap: 0, clicks: []} : null);
+  }, [transport, loopSection]);
+  useEffect(() => { transport.setRepeat(repeat === "one"); }, [transport, repeat]);
   useEffect(() => { tracker.current.reset(); }, [song.alignmentRevision]);
   useEffect(() => {
     const unsubscribe = transport.subscribe(() => {
@@ -129,6 +131,19 @@ export function PlayerPage({song, minimized, onLibrary, onExpand, onUpdate, onDe
     if (container && line) container.scrollTo({top: line.offsetTop - container.offsetTop - container.clientHeight * .38 + line.clientHeight / 2,
       behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth"});
   }, [displayed, browsing, minimized, fontSize, emojiDensity, showEmojis]);
+  useEffect(() => {
+    const currentId = currentSection?.id;
+    const map = sectionMap.current;
+    if (!currentId || !map) return;
+    const button = Array.from(map.querySelectorAll<HTMLButtonElement>(".map-section > button:first-child"))
+      .find(candidate => candidate.dataset.sectionId === currentId);
+    if (!button || typeof button.scrollIntoView !== "function") return;
+    button.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth",
+      block: "center",
+      inline: "center",
+    });
+  }, [currentSection?.id, minimized, sections.length, song.id]);
   const jump = (position: number) => { if (loopSection && (position < loopSection.start || position >= loopSection.end)) { setLoopId(null); setPracticeRange(null); } tracker.current.reset(); transport.seek(position); setBrowsing(false); setNotice(""); };
   const toggleSectionLoop = (section: SectionOccurrence) => {
     setPracticeRange(null);
@@ -177,17 +192,19 @@ export function PlayerPage({song, minimized, onLibrary, onExpand, onUpdate, onDe
     };
     window.addEventListener("keydown", keydown); return () => window.removeEventListener("keydown", keydown);
   }, [displayed, song.lines.length]);
-  const map = <aside className="listening-map" aria-label="Song map">
+  const floatingButton = <button className="subtle-button floating-lyrics-button" disabled={floatingLyrics.busy} aria-pressed={floatingLyrics.floating}
+    onClick={() => { void floatingLyrics.open().catch(error => setNotice(error.message)); }}>{floatingLyrics.busy ? "Opening lyrics…" : floatingLyrics.floating ? "Close floating lyrics" : "Floating lyrics"}</button>;
+  const map = <aside className="listening-map" aria-label="Song map" ref={sectionMap}>
     <div className="map-title"><Headphones size={18}/><div><b>{song.title}</b><small>{song.artist}</small></div></div>
     <div className="map-caption"><span>SONG SECTIONS</span><span>PLAYS</span></div>
-    <nav aria-label="Song sections">{sections.map((section, i) => <div className="map-section" key={section.id}><button onClick={() => goLine(song.lines.findIndex(l => l.id === section.lineIds[0]))}
+    <nav aria-label="Song sections">{sections.map((section, i) => <div className="map-section" key={section.id}><button data-section-id={section.id} onClick={() => goLine(song.lines.findIndex(l => l.id === section.lineIds[0]))}
       className={section.id === currentSection?.id ? "active" : ""} aria-current={section.id === currentSection?.id ? "true" : undefined}>
       <span className="map-index">{String(i + 1).padStart(2, "0")}</span><span className="map-name">{section.name}<small>{formatTime(section.start)}</small></span>
       <span className="play-count" aria-label={`${listens.counts[section.lineIds[0]] ?? 0} plays`}>{listens.counts[section.lineIds[0]] ?? 0}</span>
     </button>{loopButton(section)}</div>)}</nav>
     <p className="map-note">Lifetime completed listens. Listen through at least 90% of a section to add a play. Skipping ahead doesn’t count.</p>
   </aside>;
-  if (minimized) return <div className="mini-player"><button className="mini-title" onClick={onExpand}><Headphones/><span><b>{song.title}</b><small>{formatTime(player.position)} · Open lyrics</small></span></button><button className="icon-button" aria-label={playing ? "Pause" : "Play"} onClick={toggle}>{playing ? <Pause/> : <Play/>}</button></div>;
+  if (minimized) return <div className="mini-player">{floatingButton}<button className="mini-title" onClick={onExpand}><Headphones/><span><b>{song.title}</b><small>{formatTime(player.position)} · Open lyrics</small></span></button><button className="icon-button" aria-label={playing ? "Pause" : "Play"} onClick={toggle}>{playing ? <Pause/> : <Play/>}</button>{notice && <p className="mini-notice" role="status">{notice}</p>}</div>;
   return <div className="listening-room" ref={root}>
     <header className="listening-header"><button className="icon-button" onClick={() => {saveProgress.current(); onLibrary();}} aria-label="Back to library"><ArrowLeft size={20}/></button>
       <div className="player-title"><b>{song.title}</b><span>{song.artist || "Your recording"}</span></div><span className="listening-badge">JUST LISTEN</span>
@@ -195,16 +212,18 @@ export function PlayerPage({song, minimized, onLibrary, onExpand, onUpdate, onDe
       <button className="icon-button" aria-label="Fullscreen" onClick={() => void (document.fullscreenElement ? document.exitFullscreen() : root.current?.requestFullscreen())?.catch(() => setNotice("Fullscreen unavailable."))}><Maximize size={19}/></button>
     </header>
     <div className="listening-content">{map}<main className="listening-center">
-      <div className="stage-heading"><span>{currentSection?.name ?? "YOUR LYRICS"}</span><button className="subtle-button" onClick={() => setDrawer("timing")}><Clock3 size={14}/> Timing</button></div>
+      <div className="stage-heading">{floatingButton}<span>{currentSection?.name ?? "YOUR LYRICS"}</span><button className="subtle-button" onClick={() => setDrawer("timing")}><Clock3 size={14}/> Timing</button></div>
+      {timingReview > 0 && <p className="timing-coverage" role="status">{timingReview} lines need a listening check. Previous timing may still be used. <button className="subtle-button" onClick={() => setDrawer("timing")}>Review flagged lines</button></p>}
+      {missingTiming > 0 && <div className="timing-coverage" role="status">{missingTiming} of {song.lines.length} lines need timing. <button className="subtle-button" onClick={() => setDrawer("timing")}>Review timing</button>{!browserMode && <button className="subtle-button" onClick={() => setDrawer("settings")}>Find missing timings</button>}</div>}
       <div className="listening-lyrics" ref={stage} onWheel={() => setBrowsing(true)} onTouchMove={() => setBrowsing(true)} style={{"--lyric-size": `${fontSize}px`} as CSSProperties}>
         {song.lines.map((line, i) => <div data-line={i} key={line.id} className={`listening-line ${i === displayed ? "is-current" : ""} ${i < displayed ? "is-past" : ""}`}>
           {sections.filter(s => s.lineIds[0] === line.id).map(s => <div className="verse-heading" key={s.id}><span className="verse-label">{s.name}</span>{loopButton(s)}</div>)}
-          <button onClick={() => goLine(i)} aria-label={`Go to line ${i + 1}: ${line.text}`}><PinnedLyrics line={line} pins={visiblePins}/></button>
+          <button onClick={() => goLine(i)} aria-label={`Go to line ${i + 1}: ${line.text}`}><PinnedLyrics line={line} pins={visiblePins}/>{!usable(line) ? <small className="line-timing-needed">Timing needed</small> : !line.verified && line.timingQuality === "needs_review" ? <small className="line-timing-needed">Check timing</small> : null}</button>
         </div>)}
         {!song.lines.length && <p>Lyrics will appear here when your recording is ready.</p>}
       </div>
       {browsing && <button className="follow-button" onClick={() => setBrowsing(false)}>Follow lyrics <ArrowRight size={15}/></button>}
-      <div className="stage-status" role="status">{player.error || queueError || notice || listens.error || (loopSection ? `Looping ${loopSection.name}. Click its loop button to turn it off.` : "") || (!song.lines.some(usable) ? "Lyrics are readable. Add line timing for synchronized scrolling." : "Click any section or lyric to jump. Your music keeps flowing.")}</div>
+      <div className="stage-status" role="status">{player.error || queueError || notice || listens.error || (loopSection ? `Looping ${loopSection.name}. Click its loop button to turn it off.` : "") || (!song.lines.some(usable) ? "Lyrics are readable. Add line timing for synchronized scrolling." : "Click a timed section or lyric to jump. Your music keeps flowing.")}</div>
     </main></div>
     <footer className="listening-footer">
       {loopSection && practiceRange && <div className="practice-navigation">
@@ -237,6 +256,7 @@ export function PlayerPage({song, minimized, onLibrary, onExpand, onUpdate, onDe
         {practiceSection && !eligible.some(s => s.id === practiceSection.id) && <p>Add line timing to this section to practice smaller parts.</p>}
         {loopSection && <button className="button secondary" onClick={() => {setLoopId(null); setPracticeRange(null); transport.setTransition(null); setDrawer(null);}}>Stop practicing</button>}
       </div> : drawer === "timing" ? <><button className="button secondary" onClick={toggle}>{playing ? "Pause" : "Play"}</button><TimingEditor key={song.alignmentRevision} song={song} position={player.position} onSeek={jump} onSave={onUpdate}/></> : <div className="settings-form">
+        <p>Audio and your selected practice passage keep playing when you switch apps. Tap Floating lyrics before minimizing to follow along in a small window. Floating lyrics need browser support and may stop updating if your phone suspends this page.</p>
         <label>Lyric size<input type="range" min={28} max={72} value={fontSize} onChange={e => {setFontSize(Number(e.target.value)); writeLocal("listening.fontSize", Number(e.target.value));}}/></label>
         <div className="desktop-emoji-settings"><label><input type="checkbox" checked={showEmojis} onChange={event => {setShowEmojis(event.target.checked); writeLocal("listening.showEmojis", event.target.checked);}}/> Show lyric emojis</label>
         {showEmojis && <>
@@ -253,7 +273,7 @@ export function PlayerPage({song, minimized, onLibrary, onExpand, onUpdate, onDe
         <button className="button secondary" disabled={busy} onClick={async () => {setBusy(true); try {onUpdate(await api.geniusSections(song.id, {url: geniusUrl, title: song.title, artist: song.artist, revision: song.alignmentRevision ?? 0})); setNotice("Genius section headings applied.");} catch(e) {setNotice(String(e));} finally {setBusy(false);}}}>{busy ? "Matching sections…" : "Get Genius sections"}</button>
         <small>Paste a song link, or leave it blank to search Genius by title and artist. No API token is required.</small>
         <p role="status">{notice}</p>
-        <button className="button secondary" disabled={busy} onClick={async () => {setBusy(true); try {const {jobId} = await api.startAlignment(song.id); let job; do {await new Promise(r => setTimeout(r, 1000)); job = await api.job(jobId);} while (job.status !== "COMPLETE" && job.status !== "FAILED"); if(job.status === "FAILED") throw new Error(job.message); onUpdate(await api.song(song.id)); setNotice("Line timing updated.");} catch(e) {setNotice(String(e));} finally {setBusy(false);}}}>Find line sync</button></>}
+        <AlignmentOptions value={alignmentChoice} onChange={setAlignmentChoice} disabled={busy}/><button className="button secondary" disabled={busy} onClick={async () => {setBusy(true); try {const {jobId} = await api.startAlignment(song.id, false, alignmentChoice); let job; do {await new Promise(r => setTimeout(r, 1000)); job = await api.job(jobId);} while (job.status !== "COMPLETE" && job.status !== "FAILED"); if(job.status === "FAILED") throw new Error(job.message); const updated = await api.song(song.id); onUpdate(updated); setNotice(job.message || updated.statusMessage);} catch(e) {setNotice(String(e));} finally {setBusy(false);}}}>Redo line timing</button></>}
         <button className="danger-link" onClick={async () => {if (!confirm(`Remove “${song.title}” from this device?`)) return; try {await api.deleteSong(song.id); transport.pause(); onDelete();} catch(e) {setNotice(String(e));}}}>Remove song</button>
       </div>}
     </Drawer>}

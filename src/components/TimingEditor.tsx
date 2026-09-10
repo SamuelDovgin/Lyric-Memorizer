@@ -15,7 +15,7 @@ export function TimingEditor({
   onSave: (s: Song) => void;
 }) {
   const [lines, setLines] = useState(() => structuredClone(detectSections(song)));
-  const [selected, setSelected] = useState(0);
+  const [selected, setSelected] = useState(() => Math.max(0, song.lines.findIndex(line => !line.verified && line.timingQuality === "needs_review")));
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const line = lines[selected];
@@ -79,6 +79,12 @@ export function TimingEditor({
         Repair the lines you need. Mark the actual sung entrance and finish,
         including pickups and sustained endings.
       </p>
+      {song.alignmentRun?.snapshotPath && song.alignmentRun.inputRevision !== undefined && song.alignmentRun.inputRevision + 1 === song.alignmentRevision && <button className="button secondary" disabled={busy} onClick={async () => {
+        setBusy(true);
+        try {onSave(await api.restoreAlignment(song.id, song.alignmentRevision ?? 0));}
+        catch (error) {setMessage(String(error));}
+        finally {setBusy(false);}
+      }}>Undo last automatic timing run</button>}
       <label>
         Lyric line
         <select
@@ -87,12 +93,17 @@ export function TimingEditor({
         >
           {lines.map((l, i) => (
             <option key={l.id} value={i}>
-              {i + 1}. {l.text}
+              {i + 1}. {l.text}{!l.verified && l.timingQuality === "needs_review" ? " · Check timing" : ""}
             </option>
           ))}
         </select>
       </label>
       <blockquote>{line.text}</blockquote>
+      {!line.verified && line.timingQuality === "needs_review" && <p role="status">This line needs a listening check. The model could not confidently replace its saved timing.</p>}
+      {lines.some(l => !l.verified && l.timingQuality === "needs_review") && <button className="button secondary" onClick={() => {
+        const next = [...lines.keys()].map(i => (selected + 1 + i) % lines.length).find(i => !lines[i].verified && lines[i].timingQuality === "needs_review");
+        if (next !== undefined) {setSelected(next); onSeek(Math.max(0, lines[next].start - 1));}
+      }}>Next line to review</button>}
       <p className="muted">
         Playhead {formatTime(position)} · {position.toFixed(2)}s
       </p>

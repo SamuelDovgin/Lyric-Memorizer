@@ -1418,7 +1418,7 @@ export function PlayerPage({
                   disabled={busy}
                   onClick={() => void runJob(() => api.startAlignment(song.id))}
                 >
-                  Find line sync
+                  Find best line sync
                 </button>
                 {song.originalUrl && (
                   <button
@@ -1440,7 +1440,10 @@ export function PlayerPage({
                 </button>
               </div>
               <p>
-                Stem creation and word refinement use optional local models.
+                Best line sync compares human timestamps with locally detected
+                vocal word starts. It keeps current timing if audio evidence is
+                insufficient. The optional timing model is required.
+                Stem creation and word refinement also use local models.
                 Playback remains available while they run.
               </p>
               <p className="settings-notice" role="status">

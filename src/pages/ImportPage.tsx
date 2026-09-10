@@ -1,3 +1,4 @@
+import { AlignmentOptions, type AlignmentChoice } from "../components/AlignmentOptions";
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import {
   ArrowLeft,
@@ -11,24 +12,31 @@ import {
   Upload,
   Video,
 } from "lucide-react";
+import { browserMode } from "../lib/browserLibrary";
 import { api } from "../lib/api";
 import type { LyricSyncPreview, Song, YoutubeDownload } from "../types";
 
 interface Props {
+  song?: Song;
+  onUpdate?: (song: Song) => void;
+  onNavigationState?: (state: {dirty: boolean; busy: boolean}) => void;
   onCancel: () => void;
   onImported: (song: Song) => void;
 }
 
-export function ImportPage({ onCancel, onImported }: Props) {
+export function ImportPage({ song, onCancel, onImported, onUpdate, onNavigationState }: Props) {
+  const editing = Boolean(song);
+  const [saved, setSaved] = useState(song);
+  const [message, setMessage] = useState("");
   const youtubeInputId = useId();
   const [mode, setMode] = useState<"original" | "stems">("original");
-  const [title, setTitle] = useState("");
-  const [artist, setArtist] = useState("");
-  const [lyrics, setLyrics] = useState("");
+  const [title, setTitle] = useState(song?.title ?? "");
+  const [artist, setArtist] = useState(song?.artist ?? "");
+  const [lyrics, setLyrics] = useState(song?.lyrics ?? "");
   const [geniusUrl, setGeniusUrl] = useState("");
   const [geniusBusy, setGeniusBusy] = useState(false);
   const [geniusMessage, setGeniusMessage] = useState("");
-  const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [youtubeUrl, setYoutubeUrl] = useState(song?.sourceUrl ?? "");
   const [youtubeDownload, setYoutubeDownload] =
     useState<YoutubeDownload | null>(null);
   const [downloadBusy, setDownloadBusy] = useState(false);
@@ -39,7 +47,18 @@ export function ImportPage({ onCancel, onImported }: Props) {
   const [syncPreview, setSyncPreview] = useState<LyricSyncPreview | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [alignmentChoice, setAlignmentChoice] = useState<AlignmentChoice>({engine: song?.alignmentRun?.engine === "forced" ? "forced" : "legacy", language: song?.alignmentRun?.engineConfiguration?.language ?? "en"});
   const [error, setError] = useState<string | null>(null);
+
+  const working = busy || downloadBusy || syncBusy || geniusBusy;
+  const dirty = editing ? title !== saved?.title || artist !== saved?.artist || lyrics !== saved?.lyrics
+    : Boolean(title || artist || lyrics || youtubeUrl || original || vocals || instrumental);
+  useEffect(() => { onNavigationState?.({dirty, busy: working}); }, [dirty, working, onNavigationState]);
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => { if (dirty || working) { event.preventDefault(); event.returnValue = ''; } };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty, working]);
 
   useEffect(
     () => () => {
@@ -55,12 +74,35 @@ export function ImportPage({ onCancel, onImported }: Props) {
       return setError(
         "Wait for the YouTube download to finish before importing.",
       );
-    if (mode === "original" && !original && !youtubeUrl.trim())
+    if (!editing && mode === "original" && !original && !youtubeUrl.trim())
       return setError("Choose an original recording or paste a YouTube link.");
-    if (mode === "stems" && (!vocals || !instrumental))
+    if (!editing && mode === "stems" && (!vocals || !instrumental))
       return setError("Choose both prepared stems.");
+    if (working || browserMode) return;
+    const redo = (event.nativeEvent as SubmitEvent).submitter?.getAttribute("value") === "timing";
     setBusy(true);
     try {
+      if (saved) {
+        let updated = await api.editSong(saved.id, {title, artist, lyrics, revision: saved.alignmentRevision ?? 0});
+        setSaved(updated); onUpdate?.(updated); setMessage("Changes saved.");
+        if (redo) {
+          setMessage("Changes saved. Preparing lyric timing…");
+          const {jobId} = await api.startAlignment(saved.id, false, alignmentChoice);
+          while (true) {
+            const job = await api.job(jobId);
+            if (job.status === 'FAILED') {
+              setMessage('');
+              throw new Error(`Edits saved, but timing could not be updated: ${job.message}`);
+            }
+            setMessage(job.message);
+            if (job.status === 'COMPLETE') {
+              updated = await api.song(saved.id); setSaved(updated); onUpdate?.(updated); break;
+            }
+            await new Promise(resolve => window.setTimeout(resolve, 1500));
+          }
+        }
+        setBusy(false); return;
+      }
       const song = await api.importSong({
         title,
         artist,
@@ -77,7 +119,8 @@ export function ImportPage({ onCancel, onImported }: Props) {
       });
       onImported(song);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Import failed");
+      setMessage("");
+      setError(caught instanceof Error ? caught.message : "Save failed");
       setBusy(false);
     }
   };
@@ -100,7 +143,7 @@ export function ImportPage({ onCancel, onImported }: Props) {
       const preview = await api.previewLyricSync({
         title,
         artist,
-        duration: youtubeDownload?.duration,
+        duration: saved?.duration ?? youtubeDownload?.duration,
         lyrics: sourceLyrics,
       });
       if (preview.lyrics && !sourceLyrics.trim()) setLyrics(preview.lyrics);
@@ -174,113 +217,43 @@ export function ImportPage({ onCancel, onImported }: Props) {
 
   return (
     <div className="page narrow-page">
-      <button className="back-link" onClick={onCancel}>
+      <button className="back-link" disabled={working} onClick={onCancel}>
         <ArrowLeft size={17} /> Library
       </button>
       <div className="page-intro">
-        <span className="eyebrow">New song</span>
-        <h1>Bring in a song.</h1>
+        <span className="eyebrow">{editing ? "Edit song" : "New song"}</span>
+        <h1>{editing ? "Edit your song." : "Bring in a song."}</h1>
         <p>
-          Enter the title and artist, then choose Get lyrics + sync. Lyrics and
-          verse/chorus headings are fetched automatically.
+          {editing ? "Review your source, lyrics, and timing in one place. Save edits or run a fresh timing comparison." : "Start with a YouTube link or audio file, then review the lyrics and add your song."}
         </p>
       </div>
 
       <form className="form-card" onSubmit={submit}>
-        <div className="field-grid">
-          <label>
-            <span>Song title</span>
-            <input
-              required
-              value={title}
-              onChange={(event) => {
-                setTitle(event.target.value);
-                setSyncPreview(null);
-              }}
-              placeholder="The song you’re learning"
-            />
-          </label>
-          <label>
-            <span>
-              Artist <small>optional</small>
-            </span>
-            <input
-              value={artist}
-              onChange={(event) => {
-                setArtist(event.target.value);
-                setSyncPreview(null);
-              }}
-              placeholder="Artist or production"
-            />
-          </label>
-        </div>
-
-        <section
-          className="timing-source-card"
-          aria-label="Lyric timing source"
-        >
-          <span className="timing-source-icon">
-            <Sparkles size={19} />
-          </span>
-          <div>
-            <small>Timing source</small>
-            <b>Free LRCLIB sync + local word refinement</b>
-            <em>
-              After a YouTube download, existing lyrics and synchronized timing
-              are fetched automatically. Or enter a title and check manually.
-              Audio is never sent to LRCLIB.
-            </em>
-            <button
-              type="button"
-              className={`sync-check-button ${syncPreview?.found ? "complete" : ""}`}
-              disabled={syncBusy || !title.trim()}
-              onClick={() => void checkLyricSync()}
-            >
-              {syncBusy ? (
-                <LoaderCircle className="spin" size={16} />
-              ) : syncPreview?.found ? (
-                <Check size={16} />
-              ) : (
-                <Sparkles size={16} />
-              )}
-              {syncBusy
-                ? "Checking LRCLIB…"
-                : syncPreview?.found
-                  ? "Lyrics + sync ready"
-                  : lyrics.trim()
-                    ? "Check LRCLIB sync"
-                    : "Get lyrics + sync"}
-            </button>
-            {syncPreview && (
-              <span
-                className={`sync-preview ${syncPreview.found ? "found" : "missing"}`}
-              >
-                {syncPreview.message}
-              </span>
-            )}
-          </div>
-        </section>
-
-        <section className="genius-import">
-          <h3>Genius lyrics & section headings</h3>
-          <p>Bring in verse and chorus labels, then use LRCLIB above to find their timing.</p>
-          <label>Genius song URL<input type="url" value={geniusUrl} onChange={e => setGeniusUrl(e.target.value)} placeholder="https://genius.com/…-lyrics" /></label>
-          <button type="button" className="button secondary" disabled={geniusBusy} onClick={async () => {
-            setGeniusBusy(true); setError(null);
-            try { const result = await api.genius({url: geniusUrl, title, artist}); setLyrics(result.lyrics); setSyncPreview(null); setGeniusMessage("Genius lyrics loaded with section headings. Check LRCLIB sync next."); }
-            catch(e) {setError(String(e));} finally {setGeniusBusy(false);}
-          }}>{geniusBusy ? "Fetching Genius…" : "Get Genius lyrics"}</button>
-          <small>Title and artist are enough—no URL, pasted lyrics, or access token needed. LyricsGenius fetches the lyrics and headings. Fetching replaces the lyrics in this form.</small>
-          <p role="status">{geniusMessage}</p>
-        </section>
-
+        {browserMode && <p role="status">Song preparation requires the local audio worker. Open this song on your Mac to edit lyrics and timing.</p>}
+        <fieldset className="song-form-fields" disabled={working || browserMode}>
+        {editing ? <section className="source-fieldset" aria-label="Audio source">
+          <h2>Audio source</h2>
+          <label>YouTube source<input readOnly value={youtubeUrl} placeholder="Imported audio file" /></label>
+          <p className="field-note">Your saved recording stays attached to this song.</p>
+          {youtubeUrl && <button type="button" className="button secondary" onClick={async () => {
+            setSyncBusy(true); setError(null); setMessage("Finding lyrics from your YouTube source…");
+            try {
+              const preview = await api.refreshSongPreview(song!.id);
+              setTitle(preview.title); setArtist(preview.artist); setLyrics(preview.lyrics); setSyncPreview(null);
+              setMessage("Fresh lyrics loaded for review. Save to apply them.");
+            } catch (e) { setError(String(e)); setMessage(""); }
+            finally { setSyncBusy(false); }
+          }}>Pull lyrics from YouTube source</button>}
+        </section> : (
         <fieldset className="source-fieldset">
           <legend>Audio source</legend>
           <div className="segmented">
             <button
               type="button"
+              aria-pressed={mode === "original"}
               className={mode === "original" ? "selected" : ""}
               onClick={() => {
+                setSyncPreview(null);
                 setMode("original");
                 setVocals(undefined);
                 setInstrumental(undefined);
@@ -290,8 +263,10 @@ export function ImportPage({ onCancel, onImported }: Props) {
             </button>
             <button
               type="button"
+              aria-pressed={mode === "stems"}
               className={mode === "stems" ? "selected" : ""}
               onClick={() => {
+                setSyncPreview(null);
                 setMode("stems");
                 setOriginal(undefined);
                 setYoutubeUrl("");
@@ -308,6 +283,7 @@ export function ImportPage({ onCancel, onImported }: Props) {
                 detail="Play the original; stems are optional"
                 file={original}
                 onFile={(file) => {
+                  setSyncPreview(null);
                   setOriginal(file);
                   setError(null);
                   if (file) {
@@ -420,6 +396,99 @@ export function ImportPage({ onCancel, onImported }: Props) {
             </div>
           )}
         </fieldset>
+        )}
+
+        <h2>Song details</h2>
+        <div className="field-grid">
+          <label>
+            <span>Song title</span>
+            <input
+              required
+              value={title}
+              onChange={(event) => {
+                setTitle(event.target.value);
+                setSyncPreview(null);
+              }}
+              placeholder="The song you’re learning"
+            />
+          </label>
+          <label>
+            <span>
+              Artist <small>optional</small>
+            </span>
+            <input
+              value={artist}
+              onChange={(event) => {
+                setArtist(event.target.value);
+                setSyncPreview(null);
+              }}
+              placeholder="Artist or production"
+            />
+          </label>
+        </div>
+
+        {editing && !browserMode && <AlignmentOptions value={alignmentChoice} onChange={setAlignmentChoice} disabled={working}/>}
+        <section
+          className="timing-source-card"
+          aria-label="Lyric timing source"
+        >
+          <span className="timing-source-icon">
+            <Sparkles size={19} />
+          </span>
+          <div>
+            <small>Timing source</small>
+            <b>Find matching line timings</b>
+            <em>
+              Check for available lyric timestamps. This lookup does not verify
+              them against your recording. Audio comparison runs when you redo timings.
+            </em>
+            <button
+              type="button"
+              className={`sync-check-button ${syncPreview?.found ? "complete" : ""}`}
+              disabled={syncBusy || !title.trim()}
+              onClick={() => void checkLyricSync()}
+            >
+              {syncBusy ? (
+                <LoaderCircle className="spin" size={16} />
+              ) : syncPreview?.found ? (
+                <Check size={16} />
+              ) : (
+                <Sparkles size={16} />
+              )}
+              {syncBusy
+                ? "Checking LRCLIB…"
+                : syncPreview?.found
+                  ? "Lyrics + sync ready"
+                  : lyrics.trim()
+                    ? "Check LRCLIB sync"
+                    : "Get lyrics + sync"}
+            </button>
+            {syncPreview && (
+              <span
+                className={`sync-preview ${syncPreview.found ? "found" : "missing"}`}
+              >
+                {syncPreview.message}
+                {syncPreview.albumName ? ` · Source: ${syncPreview.albumName}` : ""}
+              </span>
+            )}
+          </div>
+        </section>
+
+        <details className="genius-import">
+          <summary>Alternative lyric source · Genius</summary>
+
+          <p>Bring in verse and chorus labels, then use LRCLIB above to find their timing.</p>
+          <label>Genius song URL<input type="url" value={geniusUrl} onChange={e => setGeniusUrl(e.target.value)} placeholder="https://genius.com/…-lyrics" /></label>
+          <button type="button" className="button secondary" disabled={geniusBusy} onClick={async () => {
+            setGeniusBusy(true); setError(null);
+            try { const result = await api.genius({url: geniusUrl, title, artist}); setLyrics(result.lyrics); setSyncPreview(null); setGeniusMessage("Genius lyrics loaded with section headings. Check LRCLIB sync next."); }
+            catch(e) {setError(String(e));} finally {setGeniusBusy(false);}
+          }}>{geniusBusy ? "Fetching Genius…" : "Get Genius lyrics"}</button>
+          <small>Title and artist are enough—no URL, pasted lyrics, or access token needed. LyricsGenius fetches the lyrics and headings. Fetching replaces the lyrics in this form.</small>
+        </details>
+        {geniusMessage && <p role="status">{geniusMessage}</p>}
+
+
 
         <label className="lyrics-field">
           <span>Exact lyrics</span>
@@ -441,6 +510,9 @@ export function ImportPage({ onCancel, onImported }: Props) {
           removed automatically.
         </p>
 
+        {editing && lyrics !== saved?.lyrics && <p className="field-note" role="status">Changed lyrics reset the old line timings. Save & redo timings to compare the new lyrics with your recording.</p>}
+        </fieldset>
+        {message && <p role="status" className="song-form-message">{message}</p>}
         {error && (
           <div className="form-error" role="alert">
             {error}
@@ -448,11 +520,11 @@ export function ImportPage({ onCancel, onImported }: Props) {
         )}
         <div className="form-actions">
           <span>
-            <Sparkles size={15} /> Free line sync; local audio processing
+            {working ? <><LoaderCircle className="spin" size={15} /> Working…</> : dirty ? "Unsaved changes" : editing ? "All changes saved" : "Ready when you are"}
           </span>
           <button
             className="button primary"
-            disabled={busy || downloadBusy}
+            disabled={working || browserMode || !title.trim() || !lyrics.trim()}
             type="submit"
           >
             {busy ? (
@@ -460,8 +532,10 @@ export function ImportPage({ onCancel, onImported }: Props) {
             ) : (
               <Upload size={18} />
             )}
-            {busy ? "Importing…" : "Import song"}
+            {busy ? (editing ? "Saving…" : "Importing…") : editing ? "Save changes" : "Import song"}
           </button>
+          {editing && <button type="submit" value="timing" className="button secondary"
+            disabled={working || browserMode || !title.trim() || !lyrics.trim() || !song?.originalUrl}>Save & redo timings</button>}
         </div>
       </form>
     </div>

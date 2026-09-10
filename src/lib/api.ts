@@ -29,6 +29,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  refreshSongPreview: (id: string) => request<{title: string; artist: string; lyrics: string}>(`/api/songs/${id}/refresh-preview`, {method: "POST"}),
+  editSong: (id: string, body: {title: string; artist: string; lyrics: string; revision: number}) => request<Song>(`/api/songs/${id}/edit`, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)}),
   listens: (id: string) => request<Record<string, number>>(`/api/songs/${id}/listens`),
   saveListens: (id: string, events: {id: string; lineId: string}[]) => request<Record<string, number>>(`/api/songs/${id}/listens`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({events})}),
   genius: (body: {url: string; title: string; artist: string}) => request<{lyrics: string; sourceUrl: string}>("/api/lyrics/genius", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)}),
@@ -79,15 +81,16 @@ export const api = {
       body,
     });
   },
-  startAlignment: (songId: string, refineWords = false) =>
+  startAlignment: (songId: string, refineWords = false, options?: {engine: "forced" | "legacy"; language: string}) =>
     request<{ jobId: string }>(
-      `/api/songs/${songId}/align?refine_words=${refineWords}`,
+      `/api/songs/${songId}/align?refine_words=${refineWords}${options ? `&engine=${options.engine}&language=${encodeURIComponent(options.language)}` : ""}`,
       { method: "POST" },
     ),
   job: (jobId: string) =>
-    request<{ status: string; progress: number; message: string }>(
+    request<{ status: string; progress: number; message: string; engine?: string; outcome?: "applied" | "partial" | "unchanged" | "failed" }>(
       `/api/jobs/${jobId}`,
     ),
+  restoreAlignment: (songId: string, revision: number) => request<Song>(`/api/songs/${songId}/alignment/restore?revision=${revision}`, {method: "POST"}),
   updateAlignment: (songId: string, lines: LyricLine[], revision = 0) =>
     request<Song>(`/api/songs/${songId}/alignment`, {
       method: "PUT",

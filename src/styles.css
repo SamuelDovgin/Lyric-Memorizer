@@ -2620,3 +2620,31 @@ button {
   .listening-controls { gap: 6px; }
   .practice-navigation { font-size: 11px; gap: 6px; }
 }
+
+.song-form-fields { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 24px; }
+.song-form-fields > h2, .song-form-fields .source-fieldset h2 { font-size: 18px; margin: 0 0 8px; }
+.genius-import summary { cursor: pointer; padding: 12px 0; font-weight: 600; }
+.genius-import[open] { padding-bottom: 16px; }
+.song-form-message { padding: 12px 16px; border-radius: 10px; background: #c5ee931a; }
+.form-actions { flex-wrap: wrap; gap: 12px; }
+.form-actions > span { margin-right: auto; }
+.song-form-fields:disabled { opacity: .7; }
+@media (max-width: 600px) {
+  .form-actions > span { width: 100%; }
+  .form-actions > button { width: 100%; justify-content: center; min-height: 44px; }
+  .song-actions { flex-wrap: wrap; gap: 12px; }
+}
+
+.timing-coverage { display: flex; align-items: center; flex-wrap: wrap; gap: .65rem; padding: .6rem 1rem; color: var(--muted); font-size: .85rem; }
+.line-timing-needed { display: block; font-size: .75rem; font-weight: 400; opacity: .65; }
+
+.alignment-options { display: grid; gap: .65rem; margin: 1rem 0; }
+.alignment-options label { display: grid; gap: .35rem; }
+.alignment-options p { font-size: .85rem; opacity: .8; }
+
+/* Keep floating lyrics reachable in both the song and library views. */
+.stage-heading { flex-wrap: wrap; }
+.floating-lyrics-button { min-height: 36px; }
+.mini-player { flex-wrap: wrap; align-items: center; }
+.mini-player .floating-lyrics-button { font-size: 11px; color: inherit; }
+.mini-notice { flex-basis: 100%; margin: 0; font-size: 12px; }
