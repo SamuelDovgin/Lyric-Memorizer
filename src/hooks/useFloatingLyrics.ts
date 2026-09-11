@@ -25,6 +25,12 @@ function hasWebkitPictureInPicture(video: SafariVideo) {
   return typeof video.webkitSetPresentationMode === 'function';
 }
 
+function isStandaloneWebApp() {
+  const standaloneNavigator = navigator as Navigator & {standalone?: boolean};
+  return standaloneNavigator.standalone === true
+    || (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches);
+}
+
 /**
  * iOS WebKit has historically been unreliable when a video plays directly
  * from a 2D canvas capture. Paint the lyrics in 2D, then present that bitmap
@@ -129,28 +135,30 @@ function createWebglSurface(source: HTMLCanvasElement): CaptureSurface | null {
   };
 }
 
-function waitForWebkitPictureInPicture(video: SafariVideo, retryAfterPlayback: Promise<unknown>) {
+function waitForWebkitPictureInPicture(video: SafariVideo, retryAfterPlayback: Promise<unknown>, standalone: boolean) {
   if (video.webkitPresentationMode === 'picture-in-picture') return Promise.resolve();
   return new Promise<void>((resolve, reject) => {
     let settled = false;
-    let timer = 0;
+    let standardRequestPending = false;
+    const timers: number[] = [];
     const changed = () => {
       if (video.webkitPresentationMode === 'picture-in-picture') finish();
+      if (document.pictureInPictureElement === video) finish();
     };
     const finish = (error?: Error) => {
       if (settled) return;
       settled = true;
-      if (timer) window.clearTimeout(timer);
+      timers.forEach(timer => window.clearTimeout(timer));
       video.removeEventListener('webkitpresentationmodechanged', changed);
+      video.removeEventListener('enterpictureinpicture', changed);
+      video.removeEventListener('loadedmetadata', request);
+      video.removeEventListener('canplay', request);
+      video.removeEventListener('playing', request);
       if (error) reject(error);
       else resolve();
     };
-    const request = (checkSupport: boolean) => {
+    const requestPrefixed = () => {
       if (settled || video.webkitPresentationMode === 'picture-in-picture') { finish(); return; }
-      if (checkSupport && video.webkitSupportsPresentationMode?.('picture-in-picture') === false) {
-        finish(new Error('unavailable'));
-        return;
-      }
       try {
         video.webkitSetPresentationMode?.('picture-in-picture');
         changed();
@@ -158,13 +166,53 @@ function waitForWebkitPictureInPicture(video: SafariVideo, retryAfterPlayback: P
         finish(error instanceof Error ? error : new Error('unavailable'));
       }
     };
+    const requestStandardThenPrefixed = () => {
+      if (settled || standardRequestPending) return;
+      if (typeof video.requestPictureInPicture !== 'function') { requestPrefixed(); return; }
+      standardRequestPending = true;
+      try {
+        // On affected iOS Safari versions this first request rejects while
+        // the captured stream is becoming playable. Its rejection is the
+        // signal that makes the following WebKit presentation-mode request
+        // succeed, so keep that fallback deliberately rather than discarding
+        // the rejection.
+        void Promise.resolve(video.requestPictureInPicture()).then(
+          () => { standardRequestPending = false; finish(); },
+          () => { standardRequestPending = false; requestPrefixed(); },
+        );
+      } catch {
+        standardRequestPending = false;
+        requestPrefixed();
+      }
+    };
+    const request = () => {
+      if (settled || video.webkitPresentationMode === 'picture-in-picture') { finish(); return; }
+      const support = video.webkitSupportsPresentationMode?.('picture-in-picture');
+      // Home Screen web apps can expose both APIs while rejecting every
+      // request. In a normal Safari tab, WebKit reports false for a captured
+      // stream even though the standard-rejection/prefixed-retry handshake
+      // below works, so only use false as a hard failure in standalone mode.
+      if (standalone && support === false) { finish(new Error('unavailable')); return; }
+      if (support === false) requestStandardThenPrefixed();
+      else requestPrefixed();
+    };
+    const retry = () => {
+      request();
+      for (const delay of [50, 150, 350, 750, 1500, 3000]) {
+        timers.push(window.setTimeout(request, delay));
+      }
+    };
     video.addEventListener('webkitpresentationmodechanged', changed);
-    timer = window.setTimeout(() => finish(video.webkitPresentationMode === 'picture-in-picture' ? undefined : new Error('unavailable')), 1500);
+    video.addEventListener('enterpictureinpicture', changed);
+    video.addEventListener('loadedmetadata', request);
+    video.addEventListener('canplay', request);
+    video.addEventListener('playing', request);
+    timers.push(window.setTimeout(() => finish(video.webkitPresentationMode === 'picture-in-picture' ? undefined : new Error('unavailable')), 4000));
     // Request in the original tap turn, then retry once the MediaStream video
     // has a playable frame. iOS Safari may ignore the first call at readyState
-    // 0, but accepts the retry from the same play operation.
-    request(false);
-    void retryAfterPlayback.then(() => request(true), error => finish(error instanceof Error ? error : new Error('unavailable')));
+    // 0, but accepts a retry from the same play operation.
+    retry();
+    void retryAfterPlayback.then(retry, error => finish(error instanceof Error ? error : new Error('unavailable')));
   });
 }
 
@@ -174,6 +222,13 @@ export function useFloatingLyrics(song: Song, transport: ListeningTransport, pra
   const latest = useRef({song, practice}); latest.current = {song, practice};
   const cleanup = useRef<(() => void) | null>(null);
   useEffect(() => () => { cleanup.current?.(); cleanup.current = null; }, [transport]);
+  const pipError = (standalone: boolean, opening: boolean) => new Error(
+    standalone
+      ? 'Floating lyrics are unavailable in the Home Screen app. Open this site in a regular Safari tab, then try again.'
+      : opening
+        ? 'Safari could not start floating lyrics in this tab. Reload the page once, then try again. Audio can still play in the background.'
+        : 'Safari could not create floating lyrics in this tab. Reload the page once, then try again.',
+  );
 
   const open = async () => {
     if (cleanup.current) { cleanup.current(); cleanup.current = null; return; }
@@ -184,6 +239,7 @@ export function useFloatingLyrics(song: Song, transport: ListeningTransport, pra
     const context = source.getContext('2d');
     const video = document.createElement('video') as SafariVideo;
     const webkitPip = hasWebkitPictureInPicture(video);
+    const standalone = isStandaloneWebApp();
     const standardPip = typeof video.requestPictureInPicture === 'function'
       && document.pictureInPictureEnabled !== false
       // Prefer WebKit's presentation-mode path whenever it exists. It is the
@@ -243,7 +299,7 @@ export function useFloatingLyrics(song: Song, transport: ListeningTransport, pra
       webglSurface?.dispose();
       captureCanvas.remove();
       setBusy(false);
-      throw new Error('This browser could not create the lyrics video. On iPhone, open the site in Safari rather than the Home Screen app.');
+      throw pipError(standalone, false);
     }
     // The first draw above happened before the stream existed. Draw once
     // after captureStream() too so WebKit has a frame before PiP is requested.
@@ -253,10 +309,9 @@ export function useFloatingLyrics(song: Song, transport: ListeningTransport, pra
       webglSurface?.dispose();
       captureCanvas.remove();
       setBusy(false);
-      throw new Error('This browser could not create the lyrics video. On iPhone, open the site in Safari rather than the Home Screen app.');
+      throw pipError(standalone, false);
     }
 
-    video.srcObject = stream;
     video.autoplay = true;
     video.muted = true;
     video.playsInline = true;
@@ -270,6 +325,13 @@ export function useFloatingLyrics(song: Song, transport: ListeningTransport, pra
     video.disablePictureInPicture = false;
     video.style.cssText = 'position:fixed;width:2px;height:2px;top:0;left:0;opacity:0.01;pointer-events:none;z-index:2147483647';
     document.body.append(video);
+    // WebKit has a long-standing MediaStream/PiP quirk: exposing native
+    // controls while srcObject is attached makes the video eligible for its
+    // presentation-mode pipeline on affected Safari releases. The controls
+    // are removed immediately; the user only sees the PiP window.
+    video.controls = true;
+    video.srcObject = stream;
+    video.controls = false;
 
     const unsubscribe = transport.subscribe(draw);
     const timer = window.setInterval(draw, 250);
@@ -317,7 +379,7 @@ export function useFloatingLyrics(song: Song, transport: ListeningTransport, pra
       // video.play() first loses transient user activation on iOS Safari.
       const playPromise = Promise.resolve(video.play());
       const pictureInPicturePromise = webkitPip
-        ? waitForWebkitPictureInPicture(video, playPromise)
+        ? waitForWebkitPictureInPicture(video, playPromise, standalone)
         // Chromium requires the stream to be playing before its standard
         // request resolves. Safari iOS takes the prefixed branch above, where
         // the presentation-mode call remains in the user-gesture turn.
@@ -328,7 +390,7 @@ export function useFloatingLyrics(song: Song, transport: ListeningTransport, pra
       setFloating(true);
     } catch {
       close();
-      throw new Error('This browser could not open floating lyrics. On iPhone, open the site in Safari rather than the Home Screen app. Audio can still play in the background.');
+      throw pipError(standalone, true);
     } finally {
       setBusy(false);
     }

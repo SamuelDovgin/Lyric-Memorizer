@@ -20,6 +20,7 @@ describe('useFloatingLyrics', () => {
   const originalModeSupport = Object.getOwnPropertyDescriptor(HTMLVideoElement.prototype, 'webkitSupportsPresentationMode');
   const originalSetMode = Object.getOwnPropertyDescriptor(HTMLVideoElement.prototype, 'webkitSetPresentationMode');
   const originalMode = Object.getOwnPropertyDescriptor(HTMLVideoElement.prototype, 'webkitPresentationMode');
+  const originalRequestPictureInPicture = Object.getOwnPropertyDescriptor(HTMLVideoElement.prototype, 'requestPictureInPicture');
   const originalGetContext = HTMLCanvasElement.prototype.getContext;
   const originalPlay = HTMLMediaElement.prototype.play;
 
@@ -34,11 +35,13 @@ describe('useFloatingLyrics', () => {
     else Reflect.deleteProperty(HTMLVideoElement.prototype, 'webkitSetPresentationMode');
     if (originalMode) Object.defineProperty(HTMLVideoElement.prototype, 'webkitPresentationMode', originalMode);
     else Reflect.deleteProperty(HTMLVideoElement.prototype, 'webkitPresentationMode');
+    if (originalRequestPictureInPicture) Object.defineProperty(HTMLVideoElement.prototype, 'requestPictureInPicture', originalRequestPictureInPicture);
+    else Reflect.deleteProperty(HTMLVideoElement.prototype, 'requestPictureInPicture');
     Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {value: originalGetContext, configurable: true, writable: true});
     Object.defineProperty(HTMLMediaElement.prototype, 'play', {value: originalPlay, configurable: true, writable: true});
   });
 
-  test('requests Safari PiP immediately and retries after the MediaStream becomes playable', async () => {
+  test('recovers from iOS Safari standard PiP rejection with the prefixed presentation mode', async () => {
     const context = {
       fillStyle: '', textAlign: '', font: '', fillRect: vi.fn(), fillText: vi.fn(), measureText: vi.fn(() => ({width: 0})),
     } as unknown as CanvasRenderingContext2D;
@@ -60,7 +63,9 @@ describe('useFloatingLyrics', () => {
       Object.defineProperty(this, 'webkitPresentationMode', {configurable: true, value: mode});
       this.dispatchEvent(new Event('webkitpresentationmodechanged'));
     });
-    Object.defineProperty(HTMLVideoElement.prototype, 'webkitSupportsPresentationMode', {configurable: true, value: () => true});
+    const standardRequest = vi.fn(() => Promise.reject(new Error('not ready')));
+    Object.defineProperty(HTMLVideoElement.prototype, 'requestPictureInPicture', {configurable: true, value: standardRequest});
+    Object.defineProperty(HTMLVideoElement.prototype, 'webkitSupportsPresentationMode', {configurable: true, value: () => false});
     Object.defineProperty(HTMLVideoElement.prototype, 'webkitSetPresentationMode', {configurable: true, value: setMode});
     Object.defineProperty(HTMLVideoElement.prototype, 'webkitPresentationMode', {configurable: true, value: 'inline'});
 
@@ -73,13 +78,14 @@ describe('useFloatingLyrics', () => {
 
     fireEvent.click(screen.getByRole('button', {name: 'Open'}));
     await waitFor(() => expect(setMode).toHaveBeenCalledWith('picture-in-picture'));
-    expect(setMode).toHaveBeenCalledTimes(1);
+    expect(standardRequest).toHaveBeenCalled();
+    expect(setMode.mock.calls.length).toBeGreaterThan(0);
     expect(play).toHaveBeenCalled();
     expect(screen.getByRole('button', {name: 'Opening'})).toBeInTheDocument();
 
     resolvePlay();
     await waitFor(() => expect(screen.getByRole('button', {name: 'Close'})).toBeInTheDocument());
-    expect(setMode).toHaveBeenCalledTimes(2);
+    expect(setMode).toHaveBeenCalledWith('picture-in-picture');
   });
 });
 
