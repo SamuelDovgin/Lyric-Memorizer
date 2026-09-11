@@ -48,3 +48,17 @@ it('uses the same form for a new audio import', async () => {
   expect(api.importSong).toHaveBeenCalledWith(expect.objectContaining({title: 'Cards', lyrics: 'New words', original}));
   expect(api.editSong).not.toHaveBeenCalled();
 });
+
+it('keeps the import form open for another song while timing runs in the background', async () => {
+  vi.mocked(api.importSong).mockResolvedValue(song);
+  const onImported = vi.fn();
+  render(<ImportPage onCancel={vi.fn()} onImported={onImported} />);
+  fireEvent.change(screen.getByLabelText('Song title'), {target: {value: 'Cards'}});
+  fireEvent.change(screen.getByLabelText('Exact lyrics'), {target: {value: 'New words'}});
+  fireEvent.change(screen.getByLabelText('Original audio'), {target: {files: [new File(['audio'], 'song.wav', {type: 'audio/wav'})]}});
+  fireEvent.click(screen.getByRole('button', {name: 'Import & add another'}));
+  await waitFor(() => expect(onImported).toHaveBeenCalledWith(song, true));
+  expect(screen.getByLabelText('Song title')).toHaveValue('');
+  expect(screen.getByLabelText('Exact lyrics')).toHaveValue('');
+  expect(screen.getByText(/Timing is running in the background/)).toBeInTheDocument();
+});

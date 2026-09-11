@@ -181,3 +181,14 @@ test("shows incomplete timing before a lyric is clicked and never seeks to its d
   fireEvent.click(screen.getByRole("button", {name: "Review timing"}));
   expect(screen.getByText("Timing & sections")).toBeInTheDocument();
 });
+
+test("minimizing keeps the selected practice and exposes floating-lyrics support feedback", async () => {
+  mock.state.status = "playing";
+  const view = render(<PlayerPage {...props}/>);
+  fireEvent.click(screen.getAllByRole("button", {name: "Loop Verse 1"})[0]);
+  view.rerender(<PlayerPage {...props} minimized/>);
+  expect(mock.transport.pause).not.toHaveBeenCalled();
+  expect(mock.transport.setTransition).toHaveBeenLastCalledWith(expect.objectContaining({start: 1, exit: 5}));
+  fireEvent.click(screen.getByRole("button", {name: "Floating lyrics"}));
+  expect(await screen.findByText(/Floating lyrics are unavailable in this browser/)).toBeVisible();
+});

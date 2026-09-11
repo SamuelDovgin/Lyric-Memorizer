@@ -177,3 +177,16 @@ def test_undo_does_not_overwrite_newer_manual_edits(saved_song):
     database.save_song(song,paths,worker.now_iso())
     with TestClient(worker.app) as client:
         assert client.post('/api/songs/fallback/alignment/restore?revision=2').status_code==409
+
+
+def test_closed_console_has_actionable_error_and_preserves_saved_song(saved_song, monkeypatch):
+    def fail(*args, **kwargs):
+        raise BrokenPipeError(32, 'Broken pipe')
+    monkeypatch.setattr(worker, 'fill_audio_gaps', fail)
+    job = run_job()
+    assert job['status'] == 'FAILED'
+    assert 'lost its console connection' in job['message']
+    assert 'Restart the local audio worker' in job['message']
+    updated, _ = database.get_song('fallback')
+    updated.pop('schemaVersion', None)
+    assert updated == saved_song

@@ -21,13 +21,15 @@ interface Props {
   onUpdate?: (song: Song) => void;
   onNavigationState?: (state: {dirty: boolean; busy: boolean}) => void;
   onCancel: () => void;
-  onImported: (song: Song) => void;
+  onImported: (song: Song, keepOpen?: boolean) => void;
 }
 
 export function ImportPage({ song, onCancel, onImported, onUpdate, onNavigationState }: Props) {
   const editing = Boolean(song);
   const [saved, setSaved] = useState(song);
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState(
+    song?.status === "READY_NEEDS_REVIEW" ? song.statusMessage : "",
+  );
   const youtubeInputId = useId();
   const [mode, setMode] = useState<"original" | "stems">("original");
   const [title, setTitle] = useState(song?.title ?? "");
@@ -47,6 +49,7 @@ export function ImportPage({ song, onCancel, onImported, onUpdate, onNavigationS
   const [syncPreview, setSyncPreview] = useState<LyricSyncPreview | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [importFormVersion, setImportFormVersion] = useState(0);
   const [alignmentChoice, setAlignmentChoice] = useState<AlignmentChoice>({engine: song?.alignmentRun?.engine === "forced" ? "forced" : "legacy", language: song?.alignmentRun?.engineConfiguration?.language ?? "en"});
   const [error, setError] = useState<string | null>(null);
 
@@ -79,7 +82,9 @@ export function ImportPage({ song, onCancel, onImported, onUpdate, onNavigationS
     if (!editing && mode === "stems" && (!vocals || !instrumental))
       return setError("Choose both prepared stems.");
     if (working || browserMode) return;
-    const redo = (event.nativeEvent as SubmitEvent).submitter?.getAttribute("value") === "timing";
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    const redo = submitter?.getAttribute("value") === "timing";
+    const keepImporting = submitter?.getAttribute("value") === "another";
     setBusy(true);
     try {
       if (saved) {
@@ -117,7 +122,25 @@ export function ImportPage({ song, onCancel, onImported, onUpdate, onNavigationS
         vocals,
         instrumental,
       });
-      onImported(song);
+      if (keepImporting) onImported(song, true);
+      else onImported(song);
+      if (keepImporting) {
+        downloadRunRef.current += 1;
+        setTitle("");
+        setArtist("");
+        setLyrics("");
+        setGeniusMessage("");
+        setYoutubeUrl("");
+        setYoutubeDownload(null);
+        setOriginal(undefined);
+        setVocals(undefined);
+        setInstrumental(undefined);
+        setSyncPreview(null);
+        setMode("original");
+        setImportFormVersion((version) => version + 1);
+        setMessage(`${song.title} imported. Timing is running in the background—add another song whenever you’re ready.`);
+        setBusy(false);
+      }
     } catch (caught) {
       setMessage("");
       setError(caught instanceof Error ? caught.message : "Save failed");
@@ -279,6 +302,7 @@ export function ImportPage({ song, onCancel, onImported, onUpdate, onNavigationS
           {mode === "original" ? (
             <div className="original-source-stack">
               <FileDrop
+                key={`original-${importFormVersion}`}
                 label="Original audio"
                 detail="Play the original; stems are optional"
                 file={original}
@@ -382,12 +406,14 @@ export function ImportPage({ song, onCancel, onImported, onUpdate, onNavigationS
           ) : (
             <div className="field-grid">
               <FileDrop
+                key={`vocals-${importFormVersion}`}
                 label="Vocal stem"
                 detail="Singer only"
                 file={vocals}
                 onFile={setVocals}
               />
               <FileDrop
+                key={`instrumental-${importFormVersion}`}
                 label="Instrumental stem"
                 detail="Everything except lead vocal"
                 file={instrumental}
@@ -536,6 +562,8 @@ export function ImportPage({ song, onCancel, onImported, onUpdate, onNavigationS
           </button>
           {editing && <button type="submit" value="timing" className="button secondary"
             disabled={working || browserMode || !title.trim() || !lyrics.trim() || !song?.originalUrl}>Save & redo timings</button>}
+          {!editing && <button type="submit" value="another" className="button secondary"
+            disabled={working || browserMode || !title.trim() || !lyrics.trim()}>Import & add another</button>}
         </div>
       </form>
     </div>

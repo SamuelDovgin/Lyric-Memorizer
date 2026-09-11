@@ -5,7 +5,7 @@ import subprocess
 import threading
 from pathlib import Path
 
-from .forced_alignment import validate_result
+from .forced_alignment import DEFAULT_DEVICE, DEFAULT_MODEL, validate_result
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -18,8 +18,9 @@ def execute_forced_alignment(song, paths, run_id, data_dir, progress, language='
     directory.mkdir(parents=True, exist_ok=False)
     # This immutable snapshot is also the rollback artifact.
     (directory / 'before.json').write_text(json.dumps(song, indent=2))
-    config = {'model': os.environ.get('LYRIC_FORCED_MODEL', 'small'), 'language': language,
-              'device': os.environ.get('LYRIC_FORCED_DEVICE', 'cpu'), 'runId': run_id,
+    requested_device = os.environ.get('LYRIC_FORCED_DEVICE', DEFAULT_DEVICE)
+    config = {'model': os.environ.get('LYRIC_FORCED_MODEL', DEFAULT_MODEL), 'language': language,
+              'device': requested_device, 'requestedDevice': requested_device, 'runId': run_id,
               'retryModel': os.environ.get('LYRIC_FORCED_RETRY_MODEL')}
     request = {'song': song, 'paths': paths, 'config': config,
                'cacheDir': str(Path(data_dir) / 'alignment-cache')}

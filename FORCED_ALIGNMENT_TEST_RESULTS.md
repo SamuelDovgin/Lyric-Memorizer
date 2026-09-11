@@ -1,10 +1,10 @@
 # Forced-alignment implementation and test results
 
-September 9, 2026 · Local Apple Silicon Mac · Engine `forced-v3`
+September 10, 2026 · Local Apple Silicon Mac · Engine `forced-v3`
 
 ## Status
 
-The preview is implemented and available in **Edit song → Timing method → Align known lyrics to audio · preview → Save & redo timings**. The same engine is available in player settings. Gorgeous has been processed through the real button and saved. A song remembers the forced method after a forced run; other songs retain the legacy default until the preview is selected.
+The preview is implemented and available in **Edit song → Timing method → Align known lyrics to audio · preview → Save & redo timings**. The same engine is available in player settings. New recordings automatically queue the forced engine after import; **Import & add another** leaves the form available while background jobs run. Existing songs still require an explicit method choice when re-running timing.
 
 **Listening accuracy remains unvalidated.** The user chose to check the result afterward and provide corrections. No manually verified onset labels were supplied, so median error, p90 error, and wrong-occurrence accuracy are not claimed. Structural checks, real model execution, and browser seeks are different forms of evidence from listening verification.
 
@@ -34,7 +34,21 @@ These counts describe software acceptance under provisional evidence checks. The
 | Doja Cat - Cards (Audio) | 60 | 47 | 13 | 25.1s | Benchmark only; library unchanged |
 | Jealous Type | 43 | 39 | 4 | 9.2s | Benchmark only; library unchanged |
 
-All trials used the original recording and Whisper small on CPU, with Stable-ts 2.19.1 and Torch/Torchaudio 2.11.0. Automatic vocal separation and larger-model retries were not needed to execute these trials; their acoustic benefit is not established by these runs.
+The original small-model trials above are historical. A follow-up benchmark on
+**Doja Cat - Lipstain (Audio)** compared the two candidates below on the same recording
+with Stable-ts 2.19.1 and Torch/Torchaudio 2.11.0:
+
+| Model | Device | End-to-end wall time | Alignment runtime | Supported | Review |
+| --- | --- | ---: | ---: | ---: | ---: |
+| medium | Apple MPS | 48.3s | 44.4s | 47 | 8 |
+| large-v3-turbo | Apple MPS | 56.1s | 52.4s | 48 | 7 |
+
+`large-v3-turbo` is now the default because it is the stronger model candidate while
+remaining within the one-minute target on this Apple Silicon machine. CPU execution of
+the same turbo run took 86.6s end-to-end, so `auto` selects Apple MPS (or CUDA when
+available) and falls back to CPU for machines without an accelerator. These are runtime
+and structural comparisons, not accuracy claims; no listening labels were available.
+Automatic vocal separation and larger-model retries were not needed to execute these trials.
 
 ## Gorgeous browser test
 
@@ -50,9 +64,9 @@ Raw Gorgeous candidate and rollback snapshot:
 
 ## Automated checks
 
-**Final check: 55 frontend tests and 88 worker tests passed (143 total), and the TypeScript/production build passed.** `git diff --check` passed as well. Run `npm run check` to repeat the automated checks. New cases cover absolute timestamp conversion, canonical identity, repeated lines, locked references, invalid model output, low evidence, retries, cache reuse/invalidation, coarse alignment, speech-duration configuration, benchmark label integrity, explicit engine selection, stale results, missing dependencies, undo protection, and the review queue.
+**Final check: 64 frontend tests and 91 worker tests passed (155 total), and the TypeScript/production build passed.** `git diff --check` passed as well. Run `npm run check` to repeat the automated checks. New cases cover absolute timestamp conversion, canonical identity, repeated lines, locked references, invalid model output, low evidence, retries, cache reuse/invalidation, coarse alignment, speech-duration configuration, benchmark label integrity, explicit engine selection, stale results, missing dependencies, undo protection, initial-import queueing, multiple-import form reuse, YouTube handoff protection, and the review queue.
 
-## What remains before default rollout
+## What remains before broader accuracy claims
 
 1. The user’s listening review and independently marked onset intervals on the exact recordings.
 2. Held-out benchmark evaluation against the original catalog/transcription results; quantify median/p90 error and wrong-occurrence mistakes.

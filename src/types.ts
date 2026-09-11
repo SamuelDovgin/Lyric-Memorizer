@@ -59,7 +59,7 @@ export interface Song {
   instrumentalUrl: string | null;
   lines: LyricLine[];
   alignmentRevision?: number;
-  alignmentRun?: {engine: string; outcome: "applied" | "partial" | "unchanged"; reviewCount: number; revisedCount: number; recoveredCount: number; accuracyValidated: boolean; inputRevision?: number; engineConfiguration?: {language?: string}; snapshotPath?: string; candidateArtifactPath?: string};
+  alignmentRun?: {engine: string; outcome: "applied" | "partial" | "unchanged"; reviewCount: number; revisedCount: number; recoveredCount: number; accuracyValidated: boolean; inputRevision?: number; engineConfiguration?: {model?: string; language?: string; device?: string; requestedDevice?: string}; snapshotPath?: string; candidateArtifactPath?: string};
   capabilities?: { playable: boolean; stems: boolean; lineTiming: boolean };
 }
 

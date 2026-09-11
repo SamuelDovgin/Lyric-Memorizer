@@ -122,7 +122,7 @@ export function LibraryPage({
                   </span>
                   <span className="song-copy">
                     <span className="library-song-status">
-                      {playable(song) ? "Ready to play" : "Preparing audio"}
+                      {song.status === "PROCESSING" ? "Timing in background" : playable(song) ? "Ready to play" : "Preparing audio"}
 
                     </span>
                     <strong>{song.title}</strong>

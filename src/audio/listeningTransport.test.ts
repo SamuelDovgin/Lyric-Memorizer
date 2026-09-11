@@ -54,6 +54,15 @@ describe('native background listening', () => {
     expect(audio.loop).toBe(false);
     transport.dispose();
   });
+  it('moves the native audio head when a paused lyric is clicked', async () => {
+    const {audio, transport} = setup();
+    await transport.play(1);
+    transport.pause();
+    transport.seek(7);
+    expect(audio.currentTime).toBe(7);
+    expect(transport.getSnapshot()).toMatchObject({status: 'paused', position: 7});
+    transport.dispose();
+  });
   it('does not start a passage after preparation is canceled', async () => {
     const {audio, transport} = setup();
     let resolve!: (value: unknown) => void;

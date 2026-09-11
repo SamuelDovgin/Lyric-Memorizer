@@ -72,9 +72,16 @@ export function getSections(song: Song): SectionOccurrence[] {
 }
 
 export function activeLine(lines: LyricLine[], time: number): number {
-  return lines.findIndex(
-    (line) => usable(line) && time >= line.start && time < line.end,
-  );
+  // Whisper and catalog anchors can overlap slightly. At a shared boundary,
+  // prefer the line whose start is latest so the previous lyric is not shown
+  // after the user clicks the new one.
+  let current = -1;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (usable(line) && time >= line.start && time < line.end &&
+        (current < 0 || line.start >= lines[current].start)) current = index;
+  }
+  return current;
 }
 export function feedbackLine(
   lines: LyricLine[],

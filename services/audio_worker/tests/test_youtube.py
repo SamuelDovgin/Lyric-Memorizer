@@ -67,6 +67,16 @@ def test_download_job_makes_original_playable_without_demucs(tmp_path, monkeypat
     monkeypatch.setattr(worker_app, "yt_dlp_command", lambda: ["yt-dlp"])
     monkeypatch.setattr(worker_app.subprocess, "run", fake_run)
     monkeypatch.setattr(worker_app, "audio_duration", lambda _: 12.0)
+    def fake_schedule_alignment(song_id, *args, **kwargs):
+        seen["alignment_job"] = "job_alignment"
+        aligned, aligned_paths = database.get_song(song_id)
+        aligned["status"] = "READY_NEEDS_REVIEW"
+        aligned["statusMessage"] = "Forced alignment finished"
+        aligned["alignmentRun"] = {"engine": "forced", "outcome": "partial"}
+        aligned["jobId"] = "job_alignment"
+        database.save_song(aligned, aligned_paths, "later")
+        return "job_alignment"
+    monkeypatch.setattr(worker_app, "schedule_alignment", fake_schedule_alignment)
     monkeypatch.setattr(worker_app, "separate_song", lambda received_song, received_job: seen.update(song=received_song, job=received_job))
 
     download_youtube_song(song_id, "job_test", "https://youtu.be/dQw4w9WgXcQ")
@@ -79,6 +89,8 @@ def test_download_job_makes_original_playable_without_demucs(tmp_path, monkeypat
     saved, paths = database.get_song(song_id)
     assert saved["duration"] == 12.0
     assert saved["status"] == "READY_NEEDS_REVIEW"
+    assert saved["jobId"] == "job_alignment"
+    assert saved["alignmentRun"]["engine"] == "forced"
     assert saved["originalUrl"]
     assert saved["artist"] == "Test channel"
     assert paths["original"].endswith("original.wav")
@@ -105,6 +117,7 @@ def test_import_reuses_completed_staged_download(tmp_path, monkeypatch):
     )
     separated = {}
     monkeypatch.setattr(worker_app, "separate_song", lambda song_id, job_id: separated.update(song=song_id, job=job_id))
+    monkeypatch.setattr(worker_app, "queue_initial_alignment", lambda *args, **kwargs: None)
 
     with TestClient(worker_app.app) as client:
         response = client.post(

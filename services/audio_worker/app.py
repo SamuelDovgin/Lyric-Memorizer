@@ -3,11 +3,13 @@ from __future__ import annotations
 import os
 from copy import deepcopy
 import json
+import logging
 import re
 import math
 import shutil
 import subprocess
 import sys
+import threading
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -43,6 +45,7 @@ from .database import (
     save_youtube_download,
 )
 from .forced_alignment_job import execute_forced_alignment
+from .forced_alignment import DEFAULT_MODEL
 from . import database
 from .timing_gaps import fill_audio_gaps, merge_catalog_gaps, usable as timing_usable
 from .listening import router as listening_router, init_listening
@@ -64,6 +67,7 @@ from .lrclib import (
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 BUNDLED_YT_DLP = REPOSITORY_ROOT / "tools" / "yt-dlp" / "yt-dlp.exe"
 YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}
+FORCED_ALIGNMENT_LOCK = threading.Lock()
 
 
 def now_iso() -> str:
@@ -438,15 +442,21 @@ def download_youtube_song(song_id: str, job_id: str, youtube_url: str) -> None:
             except Exception:
                 pass
         document["status"] = "PROCESSING"
-        document["statusMessage"] = "Download complete. Audio ready."
+        document["statusMessage"] = (
+            f"Download complete. Aligning lyric timing with Whisper {forced_model_name()} in the background."
+        )
         document.update(media_urls(song_id, paths))
         save_song(document, paths, now_iso())
-        job.update(progress=0.25, message=document["statusMessage"], updatedAt=now_iso())
-        save_job(job)
-        document["status"] = "READY_NEEDS_REVIEW"
-        document["statusMessage"] = "Audio ready. Separation is optional."
-        save_song(document, paths, now_iso())
-        job.update(status="COMPLETE", progress=1, message=document["statusMessage"], updatedAt=now_iso())
+        schedule_alignment(
+            song_id,
+            None,
+            engine="forced",
+            language="en",
+            queued_document=document,
+            queued_paths=paths,
+        )
+        job.update(status="COMPLETE", progress=1,
+                   message="Download complete. Lyric timing is running in the background.", updatedAt=now_iso())
         save_job(job)
     except Exception as exc:
         message = str(exc)
@@ -538,6 +548,51 @@ def recover_timing_without_catalog(document: dict, audio_path: str | None, reaso
     return f"Recovered {added} missing line timing(s): {catalog_added} from the saved catalog and {added - catalog_added} from audio. {reason}"
 
 
+def forced_model_name() -> str:
+    return os.environ.get("LYRIC_FORCED_MODEL") or DEFAULT_MODEL
+
+
+def schedule_alignment(
+    song_id: str,
+    background_tasks: BackgroundTasks | None = None,
+    *,
+    engine: str = "forced",
+    language: str = "en",
+    queued_document: dict | None = None,
+    queued_paths: dict | None = None,
+) -> str:
+    """Create an alignment job and optionally attach it to the HTTP response."""
+    job_id = f"job_{uuid.uuid4().hex}"
+    save_job({
+        "id": job_id, "songId": song_id, "kind": "alignment", "status": "QUEUED",
+        "progress": 0, "message": "Waiting to align lyric timing", "engine": engine,
+        "updatedAt": now_iso(),
+    })
+    if queued_document is not None and queued_paths is not None:
+        queued_document["jobId"] = job_id
+        save_song(queued_document, queued_paths, now_iso())
+    if background_tasks is not None:
+        background_tasks.add_task(align_song, song_id, job_id, False, engine, language)
+    else:
+        # Used after a YouTube download has already entered a background task.
+        align_song(song_id, job_id, False, engine, language)
+    return job_id
+
+
+def queue_initial_alignment(document: dict, paths: dict, background_tasks: BackgroundTasks, language: str = "en") -> str | None:
+    """Start forced timing after a local recording is saved, without blocking import."""
+    if not (paths.get("original") or paths.get("vocals")):
+        return None
+    job_id = schedule_alignment(document["id"], background_tasks, engine="forced", language=language)
+    document["jobId"] = job_id
+    document["status"] = "PROCESSING"
+    document["statusMessage"] = (
+        f"Audio ready. Aligning lyric timing with Whisper {forced_model_name()} in the background. "
+        "You can keep adding songs."
+    )
+    return job_id
+
+
 def align_song(song_id: str, job_id: str, refine_words: bool = False, engine: str | None = None, language: str = "en") -> None:
     found = get_song(song_id)
     if not found:
@@ -553,28 +608,41 @@ def align_song(song_id: str, job_id: str, refine_words: bool = False, engine: st
         selected_engine = engine or os.environ.get("LYRIC_ALIGNMENT_ENGINE", "legacy")
         if selected_engine not in ("forced", "legacy"):
             raise ValueError("Unknown alignment engine")
+        job["engine"] = selected_engine
         if selected_engine == "forced" and not refine_words:
-            def forced_progress(message):
-                job.update(message=message, engine="forced", updatedAt=now_iso())
+            if not FORCED_ALIGNMENT_LOCK.acquire(blocking=False):
+                job.update(status="QUEUED", progress=.05,
+                           message="Waiting for another song’s lyric timing to finish", updatedAt=now_iso())
                 save_job(job)
-            forced_progress("Preparing recording and reference points…")
-            result = execute_forced_alignment(document, paths, job_id, database.DATA_DIR, forced_progress, language)
-            document["lines"] = result["lines"]
-            document["alignmentRun"] = result["alignmentRun"]
-            document["alignmentRevision"] = revision + 1
-            document["status"] = "READY_NEEDS_REVIEW"
-            run = result["alignmentRun"]
-            review = run["reviewCount"]
-            if run["outcome"] == "unchanged":
-                message = f"Forced alignment finished. No supported timing changes; {review} lines need review."
-            else:
-                message = f"Forced alignment updated {run['revisedCount']} lines; {review} lines need review."
-            message += " Audio synchronization still needs a listening check."
-            document["statusMessage"] = message
-            save_song(document, paths, now_iso(), expected_revision=revision)
-            job.update(status="COMPLETE", progress=1, message=message, outcome=run["outcome"], engine="forced")
-            save_job(job)
-            return
+                FORCED_ALIGNMENT_LOCK.acquire()
+                job.update(status="RUNNING", progress=.1, message="Preparing recording and reference points…",
+                           updatedAt=now_iso())
+                save_job(job)
+            try:
+                def forced_progress(message):
+                    job.update(message=message, engine="forced", updatedAt=now_iso())
+                    save_job(job)
+                forced_progress("Preparing recording and reference points…")
+                result = execute_forced_alignment(document, paths, job_id, database.DATA_DIR, forced_progress, language)
+                document["lines"] = result["lines"]
+                document["alignmentRun"] = result["alignmentRun"]
+                document["alignmentRevision"] = revision + 1
+                document["jobId"] = job_id
+                document["status"] = "READY_NEEDS_REVIEW"
+                run = result["alignmentRun"]
+                review = run["reviewCount"]
+                if run["outcome"] == "unchanged":
+                    message = f"Forced alignment finished. No supported timing changes; {review} lines need review."
+                else:
+                    message = f"Forced alignment updated {run['revisedCount']} lines; {review} lines need review."
+                message += " Audio synchronization still needs a listening check."
+                document["statusMessage"] = message
+                save_song(document, paths, now_iso(), expected_revision=revision)
+                job.update(status="COMPLETE", progress=1, message=message, outcome=run["outcome"], engine="forced")
+                save_job(job)
+                return
+            finally:
+                FORCED_ALIGNMENT_LOCK.release()
         job["engine"] = "legacy"
         if not refine_words:
             job.update(progress=.15, message="Comparing synchronized candidates with the local recording")
@@ -619,7 +687,22 @@ def align_song(song_id: str, job_id: str, refine_words: bool = False, engine: st
         save_song(document, paths, now_iso(), expected_revision=revision)
         job.update(status="COMPLETE", progress=1, message=document["statusMessage"])
     except Exception as exc:
-        job.update(status="FAILED", outcome="failed", message=str(getattr(exc, "detail", exc)))
+        logging.getLogger(__name__).exception("Alignment job %s failed for song %s", job_id, song_id)
+        cause = exc
+        while cause is not None and not isinstance(cause, BrokenPipeError):
+            cause = cause.__cause__ or cause.__context__
+        message = ("The audio analyzer lost its console connection. Restart the local audio worker and retry timing. "
+                   "Your edits and existing timings are saved." if cause is not None else str(getattr(exc, "detail", exc)))
+        job.update(status="FAILED", outcome="failed", message=message)
+        latest = get_song(song_id)
+        if latest and latest[0].get("status") == "PROCESSING" and latest[0].get("jobId") == job_id:
+            failed_document, failed_paths = latest
+            failed_document["status"] = "READY_NEEDS_REVIEW"
+            failed_document["statusMessage"] = (
+                "Audio is ready, but automatic lyric timing could not finish. "
+                "Existing timing was kept; open Timing to retry."
+            )
+            save_song(failed_document, failed_paths, now_iso())
     job["updatedAt"] = now_iso()
     save_job(job)
 
@@ -938,13 +1021,14 @@ def import_song(
         save_song(document, paths, now_iso())
         background_tasks.add_task(download_youtube_song, song_id, job_id, youtube_url)
     elif paths:
-        document["statusMessage"] = "Audio ready. Play now or improve lyric timing."
+        queue_initial_alignment(document, paths, background_tasks)
         save_song(document, paths, now_iso())
     return document
 
 
 @app.post("/api/songs/{song_id}/stems")
-def upload_stems(song_id: str, vocals: UploadFile = File(...), instrumental: UploadFile = File(...)) -> dict:
+def upload_stems(song_id: str, background_tasks: BackgroundTasks,
+                 vocals: UploadFile = File(...), instrumental: UploadFile = File(...)) -> dict:
     found = get_song(song_id)
     if not found:
         raise HTTPException(404, "Song not found")
@@ -959,6 +1043,7 @@ def upload_stems(song_id: str, vocals: UploadFile = File(...), instrumental: Upl
     document["duration"] = audio_duration(vocal_path)
     document["status"] = "READY_NEEDS_REVIEW"
     document["statusMessage"] = "Stems ready. Review draft timings or run local alignment."
+    queue_initial_alignment(document, paths, background_tasks)
     save_song(document, paths, now_iso())
     return document
 
@@ -974,12 +1059,15 @@ def start_alignment(song_id: str, background_tasks: BackgroundTasks, refine_word
         raise HTTPException(422, "Unsupported alignment language")
     if refine_words and not found[1].get("vocals"):
         raise HTTPException(409, "Create vocal stems before refining words")
-    job_id = f"job_{uuid.uuid4().hex}"
-    save_job({
-        "id": job_id, "songId": song_id, "kind": "alignment", "status": "QUEUED",
-        "progress": 0, "message": "Waiting to start", "updatedAt": now_iso(),
-    })
-    background_tasks.add_task(align_song, song_id, job_id, refine_words, engine, language)
+    selected_engine = engine or os.environ.get("LYRIC_ALIGNMENT_ENGINE", "legacy")
+    job_id = schedule_alignment(song_id, background_tasks, engine=selected_engine, language=language) if not refine_words else None
+    if refine_words:
+        job_id = f"job_{uuid.uuid4().hex}"
+        save_job({
+            "id": job_id, "songId": song_id, "kind": "alignment", "status": "QUEUED",
+            "progress": 0, "message": "Waiting to start", "updatedAt": now_iso(),
+        })
+        background_tasks.add_task(align_song, song_id, job_id, refine_words, engine, language)
     return {"jobId": job_id}
 
 

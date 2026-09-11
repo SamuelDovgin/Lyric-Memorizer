@@ -6,9 +6,9 @@ Implementation proposal for Lyric Memorizer · September 9, 2026
 
 Make **forced alignment of the known lyrics against the recording** the primary timing engine behind **Save & redo timings**. Use human-measured timestamps to guide the search and detect errors. Return one useful start time per lyric line; precise word highlighting is optional.
 
-Start with **Stable-ts using the existing Whisper small model**, because a local experiment on Gorgeous produced promising line boundaries without asking the model to transcribe the lyrics correctly first. Treat this as a candidate implementation until it passes listening-based evaluation. WhisperX’s phoneme alignment is a possible comparison engine if Stable-ts fails the benchmark; do not build both pipelines initially.
+The initial experiment used **Stable-ts with Whisper small**, because a local experiment on Gorgeous produced promising line boundaries without asking the model to transcribe the lyrics correctly first. The current import default is Stable-ts with Whisper `large-v3-turbo` and automatic accelerator selection; it remains a candidate until it passes listening-based evaluation. WhisperX’s phoneme alignment is a possible comparison engine if Stable-ts fails the benchmark; do not build both pipelines initially.
 
-**Implementation status (updated September 9, 2026):** the forced-alignment preview is now implemented and connected to Save & redo timings. The legacy backend default remains available. Real-model runs have been performed on Gorgeous, Cards, and Jealous Type; human onset-accuracy validation is pending. The user chose to listen and provide corrections afterward. See [implementation and test results](./FORCED_ALIGNMENT_TEST_RESULTS.md) and the [setup instructions](./README.md#forced-lyric-alignment-preview). The plan below remains the design and acceptance reference; model output must not be described as listening-verified.
+**Implementation status (updated September 10, 2026):** the forced-alignment preview is implemented, connected to Save & redo timings, and automatically queued for recordings on initial import. The legacy backend remains available for explicit API/manual selection. A Lipstain benchmark selected Whisper `large-v3-turbo` with automatic accelerator selection for the one-minute local target; human onset-accuracy validation is still pending. See [implementation and test results](./FORCED_ALIGNMENT_TEST_RESULTS.md) and the [setup instructions](./README.md#forced-lyric-alignment-preview). The plan below remains the design and acceptance reference; model output must not be described as listening-verified.
 
 ## What needs to change
 
@@ -184,7 +184,7 @@ Do not separate vocals for every run by default. Compare separation quality and 
 | `src/pages/ImportPage.tsx` | Progress and result presentation for Save & redo timings |
 | `src/pages/PlayerPage.tsx` | Show timing quality/review state without equating coverage with accuracy |
 
-Keep the existing job endpoint initially. Use a configurable engine selector during development, for example `LYRIC_ALIGNMENT_ENGINE=legacy|forced`. Deploy the new engine as default only after evaluation passes. Record which engine actually ran, including any fallback.
+Keep the existing job endpoint. Use a configurable engine selector for explicit manual/API reruns, for example `LYRIC_ALIGNMENT_ENGINE=legacy|forced`; initial recording imports use the forced turbo path automatically. Record which engine actually ran, including any fallback.
 
 Use a dedicated alignment environment or worker with pinned, compatible dependencies. Document its installation and model-cache location. If it is unavailable, report that directly; do not silently label a legacy run as forced alignment.
 

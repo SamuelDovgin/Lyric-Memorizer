@@ -17,6 +17,24 @@ from statistics import mean, median
 from .alignment_windows import alignment_text, plan_passages, reference_kind, valid_bounds
 
 ENGINE_VERSION = 'forced-v3'
+DEFAULT_MODEL = 'large-v3-turbo'
+DEFAULT_DEVICE = 'auto'
+
+
+def resolve_device(requested: str | None = DEFAULT_DEVICE) -> str:
+    """Choose a local accelerator when available, with a portable CPU fallback."""
+    requested = (requested or DEFAULT_DEVICE).strip().lower()
+    if requested != DEFAULT_DEVICE:
+        return requested
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return 'cuda'
+        if torch.backends.mps.is_available():
+            return 'mps'
+    except Exception:
+        pass
+    return 'cpu'
 
 
 def digest(value) -> str:
@@ -71,10 +89,28 @@ def evaluate_segments(lines: list[dict], indices: list[int], segments: list[dict
 
 
 class StableAdapter:
-    def __init__(self, model_name='small', language='en', device='cpu'):
+    def __init__(self, model_name=DEFAULT_MODEL, language='en', device=DEFAULT_DEVICE):
         import stable_whisper
         import whisper
-        self.model = stable_whisper.load_model(model_name, device=device)
+        self.device = resolve_device(device)
+        if self.device.startswith('mps'):
+            # Whisper's DTW helper calls .double() before moving the tensor to
+            # CPU. MPS does not implement float64, while the DTW itself is
+            # inexpensive and does not benefit materially from GPU execution.
+            # Keep model inference on MPS and move only this calculation to CPU.
+            try:
+                from stable_whisper import timing as stable_timing
+                from whisper.timing import dtw as whisper_dtw
+
+                def cpu_dtw(matrix):
+                    return whisper_dtw(matrix.detach().float().cpu())
+
+                stable_timing.dtw = cpu_dtw
+            except ImportError:
+                # Lightweight adapter doubles used by tests do not expose the
+                # Stable-ts module tree; they do not execute this DTW path.
+                pass
+        self.model = stable_whisper.load_model(model_name, device=self.device)
         self.whisper = whisper
         self.language = language
         self.audio = {}
@@ -111,7 +147,7 @@ def run_alignment(song: dict, paths: dict, config: dict, cache_dir: Path, adapte
         text = '\n'.join(alignment_text(lines[i]) for i in indices)
         if path not in hashes:
             hashes[path] = file_hash(path)
-        key = digest([hashes[path], text, lo, hi, settings, model_name or config.get('model', 'small')])
+        key = digest([hashes[path], text, lo, hi, settings, model_name or config.get('model', DEFAULT_MODEL)])
         target = cache_dir / f'{key}.json'
         if target.exists():
             segments = json.loads(target.read_text())
@@ -170,7 +206,7 @@ def run_alignment(song: dict, paths: dict, config: dict, cache_dir: Path, adapte
         if config.get('retryModel') and any(estimates[i]['reasons'] for i in window.owner_indices if not lines[i].get('verified')):
             if larger_adapter is None:
                 progress('Loading optional larger model for uncertain passages…')
-                larger_adapter = StableAdapter(config['retryModel'], config['language'], config.get('device', 'cpu'))
+                larger_adapter = StableAdapter(config['retryModel'], config['language'], config.get('device', DEFAULT_DEVICE))
             retry = infer(window.context_indices, window.start, window.end, original, larger_adapter, config['retryModel'])
             for i in window.owner_indices:
                 if estimates[i]['reasons'] and not retry[i]['reasons']:
@@ -197,7 +233,7 @@ def run_alignment(song: dict, paths: dict, config: dict, cache_dir: Path, adapte
             supported += 1
         else:
             result[i]['timingQuality'] = 'needs_review'
-        result[i]['timingEvidence'] = {**evidence, 'engine': ENGINE_VERSION, 'model': evidence.get('retryModel', config.get('model', 'small')),
+        result[i]['timingEvidence'] = {**evidence, 'engine': ENGINE_VERSION, 'model': evidence.get('retryModel', config.get('model', DEFAULT_MODEL)),
                                         'engineVersion': '2.19.1', 'runId': config.get('runId'),
                                         'backingPhrasesExcluded': alignment_text(old) != ' '.join(old['text'].replace('’', "'").split())}
     # A rejected old timestamp must not force a newly accepted line into a false order.

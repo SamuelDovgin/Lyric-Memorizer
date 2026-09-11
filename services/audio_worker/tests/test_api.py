@@ -27,6 +27,7 @@ def test_import_prepared_stems_and_persist_feedback(tmp_path, monkeypatch):
     # app imports SONG_DIR by value, so point that binding at the same isolated fixture.
     monkeypatch.setattr("services.audio_worker.app.SONG_DIR", tmp_path / "songs")
     database.init_db()
+    monkeypatch.setattr("services.audio_worker.app.queue_initial_alignment", lambda *args, **kwargs: None)
 
     with TestClient(app) as client:
         response = client.post(
@@ -53,6 +54,34 @@ def test_import_prepared_stems_and_persist_feedback(tmp_path, monkeypatch):
         stored = client.get(f"/api/songs/{song['id']}/practice-state").json()
         assert stored["events"] == [event]
         assert client.get(f"/api/songs/{song['id']}/cards").status_code == 404
+
+
+def test_initial_recording_import_queues_forced_timing(tmp_path, monkeypatch):
+    monkeypatch.setattr(database, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "test.sqlite3")
+    monkeypatch.setattr(database, "SONG_DIR", tmp_path / "songs")
+    monkeypatch.setattr("services.audio_worker.app.SONG_DIR", tmp_path / "songs")
+    seen = {}
+
+    def schedule(song_id, background_tasks, *, engine, language):
+        seen.update(song_id=song_id, background_tasks=background_tasks, engine=engine, language=language)
+        return "job_initial_alignment"
+
+    monkeypatch.setattr("services.audio_worker.app.schedule_alignment", schedule)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/songs/import",
+            data={"title": "Queued fixture", "artist": "Test", "lyrics": "First line"},
+            files={"original": ("song.wav", wav_bytes(), "audio/wav")},
+        )
+    assert response.status_code == 201, response.text
+    song = response.json()
+    assert song["status"] == "PROCESSING"
+    assert song["jobId"] == "job_initial_alignment"
+    assert "background" in song["statusMessage"]
+    assert seen["song_id"] == song["id"]
+    assert seen["engine"] == "forced"
+    assert seen["language"] == "en"
 
 
 
@@ -82,6 +111,7 @@ def test_song_readiness_survives_updates_and_deletion(tmp_path, monkeypatch):
     monkeypatch.setattr(database, "DB_PATH", tmp_path / "test.sqlite3")
     monkeypatch.setattr(database, "SONG_DIR", tmp_path / "songs")
     monkeypatch.setattr("services.audio_worker.app.SONG_DIR", tmp_path / "songs")
+    monkeypatch.setattr("services.audio_worker.app.queue_initial_alignment", lambda *args, **kwargs: None)
     with TestClient(app) as client:
         response = client.post("/api/songs/import",
             data={"title": "Readiness fixture", "artist": "Test", "lyrics": "One invented line"},
@@ -109,6 +139,7 @@ def test_emoji_pins_validate_anchors_and_preserve_song(tmp_path, monkeypatch):
     monkeypatch.setattr(database, "DB_PATH", tmp_path / "test.sqlite3")
     monkeypatch.setattr(database, "SONG_DIR", tmp_path / "songs")
     monkeypatch.setattr("services.audio_worker.app.SONG_DIR", tmp_path / "songs")
+    monkeypatch.setattr("services.audio_worker.app.queue_initial_alignment", lambda *args, **kwargs: None)
     with TestClient(app) as client:
         response = client.post("/api/songs/import", data={"title": "Pins", "lyrics": "Open the door"},
             files={"original": ("song.wav", wav_bytes(), "audio/wav")})

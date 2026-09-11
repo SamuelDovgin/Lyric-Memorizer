@@ -1,7 +1,7 @@
 const ROOT = new URL('./', self.location.href);
 const PREFIX = 'lyric-player-' + ROOT.pathname + '-';
-const CACHE = PREFIX + '094ee24e12e3f92b';
-const ASSETS = ["./","assets/index-CJLC8IAS.css","assets/index-D2qUX4Rf.js","icon-192.png","icon-512.png","index.html","manifest.webmanifest"].map(path => new URL(path, ROOT).href);
+const CACHE = PREFIX + '4358fa0f03b6c58b';
+const ASSETS = ["./","assets/index-CJLC8IAS.css","assets/index-DXJh-K28.js","icon-192.png","icon-512.png","index.html","manifest.webmanifest"].map(path => new URL(path, ROOT).href);
 self.addEventListener('install', event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS))));
 self.addEventListener('activate', event => event.waitUntil((async () => {
   for (const key of await caches.keys()) if (key.startsWith(PREFIX) && key !== CACHE) await caches.delete(key);

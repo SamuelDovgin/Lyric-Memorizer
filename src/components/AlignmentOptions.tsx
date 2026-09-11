@@ -7,6 +7,6 @@ export function AlignmentOptions({value, onChange, disabled = false}: {value: Al
     </select></label>
     {value.engine === 'forced' && <><label>Lyrics language<select aria-label="Lyrics language" disabled={disabled} value={value.language} onChange={event => onChange({...value, language: event.target.value})}>
       {Object.entries({en: 'English', es: 'Spanish', fr: 'French', de: 'German', it: 'Italian', pt: 'Portuguese', ja: 'Japanese', ko: 'Korean', zh: 'Chinese'}).map(([code, name]) => <option key={code} value={code}>{name}</option>)}
-    </select></label><p>Uses your lyrics and recording to estimate line starts. Existing timestamps guide the search; manually verified lines stay locked. Please check the result by listening. Language accuracy has not yet been benchmarked.</p></>}
+    </select></label><p>Uses your lyrics and the larger Whisper turbo model to estimate line starts. Existing timestamps guide the search; manually verified lines stay locked. New imports run this automatically in the background, so you can keep adding songs. Please check the result by listening.</p></>}
   </div>;
 }

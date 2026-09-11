@@ -60,19 +60,23 @@ export function App() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
-  // Imports can finish while the song is already open. Optional jobs do not gate playback.
+  // Timing runs in the worker after import. Keep every pending song updated so
+  // another import can be started while earlier songs are still being aligned.
+  const processingIds = songs.filter((song) => song.status === "PROCESSING").map((song) => song.id).join(",");
   useEffect(() => {
-    if (!current || current.status !== "PROCESSING") return;
-    const timer = setInterval(() => {
-      void api
-        .song(current.id)
-        .then((song) =>
-          setCurrent((latest) => (latest?.id === song.id ? song : latest)),
-        )
-        .catch(() => {});
-    }, 1500);
+    if (!processingIds) return;
+    const refreshProcessing = () => {
+      for (const id of processingIds.split(",")) {
+        void api.song(id).then((song) => {
+          setSongs((latest) => latest.map((item) => item.id === song.id ? song : item));
+          setCurrent((latest) => latest?.id === song.id ? song : latest);
+        }).catch(() => {});
+      }
+    };
+    refreshProcessing();
+    const timer = setInterval(refreshProcessing, 1500);
     return () => clearInterval(timer);
-  }, [current?.id, current?.status]);
+  }, [processingIds]);
   const open = async (id: string, focus = false) => {
     const generation = ++openGeneration.current;
     try {
@@ -178,8 +182,9 @@ export function App() {
           onUpdate={update}
           onNavigationState={formNavigationState}
           onCancel={() => navigate("library")}
-          onImported={(song) => {
+          onImported={(song, keepOpen = false) => {
             setSongs((s) => [song, ...s]);
+            if (keepOpen) return;
             setCurrent(song);
             setAutoPlay(false);
             played.current = [song.id];

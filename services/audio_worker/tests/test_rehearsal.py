@@ -14,6 +14,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(db, 'DB_PATH', tmp_path / 'test.sqlite3')
     monkeypatch.setattr(db, 'SONG_DIR', tmp_path / 'songs')
     monkeypatch.setattr(worker, 'SONG_DIR', tmp_path / 'songs')
+    monkeypatch.setattr(worker, 'queue_initial_alignment', lambda *args, **kwargs: None)
     with TestClient(worker.app) as client:
         yield client
 

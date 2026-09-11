@@ -104,14 +104,29 @@ export class ListeningTransport {
       if (generation !== this.generation || this.disposed) return;
       this.emit({status: 'playing', position: target, pass: this.state.pass + 1});
     } catch (error) {
-      if (generation === this.generation && !this.disposed) this.emit({status: 'error', error: error instanceof Error ? error.message : 'Press Play to resume audio.'});
+      if (generation === this.generation && !this.disposed) {
+        this.audio.pause();
+        this.emit({status: 'error', error: error instanceof Error ? error.message : 'Press Play to resume audio.'});
+      }
     }
   }
   pause() { ++this.generation; this.audio.pause(); this.update(); this.emit({status: 'paused'}); }
   seek(position: number) {
     const target = Math.max(0, Math.min(position, this.state.duration || position));
     if (['playing', 'loading'].includes(this.state.status)) void this.play(target);
-    else { this.emit({position: target, status: 'paused'}); }
+    else {
+      // A paused click must move the native media element too. Previously the
+      // React position changed while the audio head stayed where it was.
+      const end = this.plan?.exit ?? this.state.duration;
+      const inCurrentSource = this.sourceKey === this.desiredKey()
+        && target >= this.sourceStart
+        && (!end || target < end);
+      if (inCurrentSource) {
+        this.audio.currentTime = Math.max(0, target - this.sourceStart);
+        this.previous = this.audio.currentTime;
+      }
+      this.emit({position: target, status: 'paused'});
+    }
   }
   setTransition(plan: Transition | null) {
     if (plan && (plan.gap !== 0 || plan.clicks.length)) throw new Error('Listening practice supports continuous repeats.');

@@ -293,6 +293,9 @@ def transcribe_anchored_vocals(
         transcript = whisper.transcribe(
             model,
             clip,
+            # False still enables Whisper's terminal progress bar; a detached
+            # worker can have closed console pipes. UI progress is reported above.
+            verbose=None,
             detect_disfluencies=False,
             initial_prompt=prompt[:1800],
             condition_on_previous_text=False,
@@ -326,6 +329,9 @@ def transcribe_vocals(path: str, model_name: str = "small", prompt: str = "") ->
     result = whisper.transcribe(
         model,
         audio,
+        # whisper_timestamped forwards False to Whisper's progress renderer;
+        # None disables tqdm entirely. This worker may outlive its terminal.
+        verbose=None,
         detect_disfluencies=False,
         initial_prompt=prompt[:4000] or None,
         condition_on_previous_text=False,

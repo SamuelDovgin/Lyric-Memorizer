@@ -5,6 +5,7 @@ import {
   defaultSettings,
   deriveState,
   feedbackLine,
+  activeLine,
   getSections,
   makePassage,
   phrase,
@@ -52,6 +53,12 @@ const event = (
   createdAt: `2026-09-05T12:00:0${sequence}Z`,
 });
 describe("musical navigation", () => {
+  it("chooses the newer lyric when Whisper and catalog windows overlap", () => {
+    const overlapping = song.lines.map((line) => ({...line}));
+    overlapping[1].start = 4.2;
+    overlapping[0].end = 4.6;
+    expect(activeLine(overlapping, 4.3)).toBe(1);
+  });
   it("distinguishes identically named choruses and keeps exact occurrence scope", () => {
     expect(getSections(song).map((s) => s.name)).toEqual([
       "Chorus 1",
