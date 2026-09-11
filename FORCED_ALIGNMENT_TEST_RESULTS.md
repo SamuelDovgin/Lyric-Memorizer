@@ -1,10 +1,10 @@
 # Forced-alignment implementation and test results
 
-September 10, 2026 · Local Apple Silicon Mac · Engine `forced-v3`
+September 10, 2026 · Local Apple Silicon Mac · Engine `forced-v4`
 
 ## Status
 
-The preview is implemented and available in **Edit song → Timing method → Align known lyrics to audio · preview → Save & redo timings**. The same engine is available in player settings. New recordings automatically queue the forced engine after import; **Import & add another** leaves the form available while background jobs run. Existing songs still require an explicit method choice when re-running timing.
+The forced alignment path is implemented and runs from **Edit song → Save & redo timings** and the player settings. New recordings automatically queue the forced engine after import; **Import & add another** leaves the form available while background jobs run. Existing songs now use the forced engine by default when timing is re-run.
 
 **Listening accuracy remains unvalidated.** The user chose to check the result afterward and provide corrections. No manually verified onset labels were supplied, so median error, p90 error, and wrong-occurrence accuracy are not claimed. Structural checks, real model execution, and browser seeks are different forms of evidence from listening verification.
 
@@ -43,11 +43,12 @@ with Stable-ts 2.19.1 and Torch/Torchaudio 2.11.0:
 | medium | Apple MPS | 48.3s | 44.4s | 47 | 8 |
 | large-v3-turbo | Apple MPS | 56.1s | 52.4s | 48 | 7 |
 
-`large-v3-turbo` is now the default because it is the stronger model candidate while
-remaining within the one-minute target on this Apple Silicon machine. CPU execution of
-the same turbo run took 86.6s end-to-end, so `auto` selects Apple MPS (or CUDA when
-available) and falls back to CPU for machines without an accelerator. These are runtime
-and structural comparisons, not accuracy claims; no listening labels were available.
+The earlier benchmark selected `large-v3-turbo` for the one-minute speed target. The app
+now defaults to the higher-accuracy `large-v3`; its runtime should be measured separately
+on the target machine rather than inferred from the turbo result. CPU execution of the
+turbo run took 86.6s end-to-end, so `auto` selects Apple MPS (or CUDA when available) and
+falls back to CPU for machines without an accelerator. These are runtime and structural
+comparisons, not accuracy claims; no listening labels were available.
 Automatic vocal separation and larger-model retries were not needed to execute these trials.
 
 ## Gorgeous browser test
@@ -73,4 +74,4 @@ Raw Gorgeous candidate and rollback snapshot:
 3. Calibration of acceptance thresholds and tests on more artists, languages, edited recordings, and vocal-separation conditions.
 4. Broader automatic enablement only after those results support it.
 
-The three current recordings are English Doja Cat songs. They exercise singing, rap, repetition, and spoken/backing material, but do not establish broad artist/language generalization. The optional supported-language selector is not a claim of measured multilingual accuracy.
+The three current recordings are English Doja Cat songs. They exercise singing, rap, repetition, and spoken/backing material, but do not establish broad artist/language generalization. The app currently runs the English configuration only; multilingual coverage remains future work.

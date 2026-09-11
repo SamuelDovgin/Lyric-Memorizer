@@ -63,6 +63,28 @@ describe('native background listening', () => {
     expect(transport.getSnapshot()).toMatchObject({status: 'paused', position: 7});
     transport.dispose();
   });
+  it('wraps ten-second media seeks inside an active loop', async () => {
+    const {audio, transport} = setup();
+    transport.setTransition({id: 'verse', start: 2, exit: 6, gap: 0, clicks: []});
+    await transport.play(3);
+    const play = vi.spyOn(transport, 'play');
+    transport.seekBy(10);
+    expect(play).toHaveBeenLastCalledWith(5);
+    transport.pause();
+    play.mockRestore();
+
+    await transport.play(3);
+    transport.pause();
+
+    transport.seekBy(10);
+    expect(transport.getSnapshot()).toMatchObject({status: 'paused', position: 5});
+    expect(audio.currentTime).toBe(3);
+
+    transport.seekBy(-10);
+    expect(transport.getSnapshot()).toMatchObject({status: 'paused', position: 3});
+    expect(audio.currentTime).toBe(1);
+    transport.dispose();
+  });
   it('does not start a passage after preparation is canceled', async () => {
     const {audio, transport} = setup();
     let resolve!: (value: unknown) => void;

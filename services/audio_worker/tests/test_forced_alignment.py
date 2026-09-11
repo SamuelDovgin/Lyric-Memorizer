@@ -93,6 +93,18 @@ def test_run_preserves_locked_lines_ids_and_line_only_tokens(tmp_path):
     assert adapter.calls > count
 
 
+def test_run_reports_passage_progress_for_the_ui(tmp_path):
+    song = song_fixture()
+    audio = tmp_path / 'audio'
+    audio.write_bytes(b'recording')
+    events = []
+    run_alignment(song, {'original': str(audio)}, {'language': 'en', 'model': 'fake'}, tmp_path / 'cache', Adapter(song),
+                  progress=lambda *event: events.append(event))
+    assert events
+    assert all(len(event) == 2 and 0 <= event[0] <= .98 for event in events)
+    assert any('Aligning passage' in event[1] for event in events)
+
+
 def test_low_evidence_retries_and_keeps_old_timing(tmp_path):
     song = song_fixture()
     audio = tmp_path/'audio';audio.write_bytes(b'a')

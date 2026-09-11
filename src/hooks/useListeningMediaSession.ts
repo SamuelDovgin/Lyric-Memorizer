@@ -12,8 +12,8 @@ export function useListeningMediaSession(song: Song, transport: ListeningTranspo
       play: () => { void transport.play(); }, pause: () => transport.pause(),
       nexttrack: () => actions.current.next(), previoustrack: () => actions.current.previous(),
       seekto: event => { if (event.seekTime !== undefined) transport.seek(event.seekTime); },
-      seekbackward: event => transport.seek(transport.getSnapshot().position - (event.seekOffset ?? 10)),
-      seekforward: event => transport.seek(transport.getSnapshot().position + (event.seekOffset ?? 10)),
+      seekbackward: event => transport.seekBy(-(event.seekOffset ?? 10)),
+      seekforward: event => transport.seekBy(event.seekOffset ?? 10),
     };
     for (const [action, handler] of Object.entries(handlers)) try { session.setActionHandler(action as MediaSessionAction, handler!); } catch { /* optional browser action */ }
     const update = () => {

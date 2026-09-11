@@ -61,6 +61,22 @@ export interface Song {
   alignmentRevision?: number;
   alignmentRun?: {engine: string; outcome: "applied" | "partial" | "unchanged"; reviewCount: number; revisedCount: number; recoveredCount: number; accuracyValidated: boolean; inputRevision?: number; engineConfiguration?: {model?: string; language?: string; device?: string; requestedDevice?: string}; snapshotPath?: string; candidateArtifactPath?: string};
   capabilities?: { playable: boolean; stems: boolean; lineTiming: boolean };
+  /** Local UI-only fields populated while the background worker is polled. */
+  processingProgress?: number;
+  processingMessage?: string;
+  processingJobKind?: string;
+}
+
+export interface JobStatus {
+  id?: string;
+  songId?: string;
+  kind?: string;
+  status: "QUEUED" | "RUNNING" | "COMPLETE" | "FAILED";
+  progress: number;
+  message: string;
+  updatedAt?: string;
+  engine?: string;
+  outcome?: "applied" | "partial" | "unchanged" | "failed";
 }
 
 export interface ImportValues {

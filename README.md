@@ -192,15 +192,21 @@ Install the isolated model environment on Python 3.11 with FFmpeg available:
 ```
 
 New imports that include an original recording or vocal stem automatically queue
-**Align known lyrics to audio · preview** in the background. The import form returns
+**Whisper forced alignment** in the background. The import form returns
 immediately, so use **Import & add another** to keep adding songs while earlier timings
 are processed. Forced jobs are run one at a time to keep local memory use bounded.
 
-For an existing song, open **Edit song**, select **Align known lyrics to audio · preview**,
-choose the lyrics language, and click **Save & redo timings**. The same selector is
-available in the player's settings. A song previously processed with forced alignment
-remembers that method. `LYRIC_ALIGNMENT_ENGINE=forced` can explicitly select the forced
-backend for API calls that do not specify an engine.
+For local recordings, the **Original audio** picker also accepts multiple files at
+once. Each selected file gets its own title and lyrics row; **Import all songs**
+submits the batch and leaves any failed file available for retry. The library and
+player show the live alignment percentage and current Whisper phase while those
+imports finish.
+
+For an existing song, open **Edit song** and click **Save & redo timings**. Whisper forced
+alignment is now the default and the same fixed method is used from the player's settings.
+The app runs the English configuration automatically; alternate timing methods and
+languages are no longer exposed in the interface. The API still accepts `engine=legacy`
+for older comparison runs.
 
 The original recording is used first. An existing vocal stem may be tried for uncertain
 passages; the engine does not create stems automatically. Verified lines remain locked.
@@ -208,10 +214,14 @@ Open **Timing** to move through flagged lines and check their entrances. The las
 run can be undone there while no newer lyric/timing edits have been made.
 
 Configuration: `LYRIC_ALIGNMENT_PYTHON` overrides the isolated Python executable;
-`LYRIC_FORCED_MODEL` defaults to `large-v3-turbo`; `LYRIC_FORCED_RETRY_MODEL` optionally tries
-another model on uncertain passages; `LYRIC_FORCED_DEVICE` defaults to `auto`, selecting CUDA,
-Apple MPS, or CPU; `LYRIC_FORCED_TIMEOUT_SECONDS` defaults to 1800. Models use Whisper's cache (normally
-`~/.cache/whisper`). Model weights download on first use. No recording upload is required.
+`LYRIC_FORCED_MODEL` defaults to the higher-accuracy `large-v3` (set it to
+`large-v3-turbo` only when faster, lower-memory runs are more important);
+`LYRIC_FORCED_RETRY_MODEL` optionally tries another model on uncertain passages;
+`LYRIC_FORCED_DEVICE` defaults to `auto`, selecting CUDA, Apple MPS, or CPU;
+`LYRIC_FORCED_TIMEOUT_SECONDS` defaults to 1800. Models use Whisper's cache (normally
+`~/.cache/whisper`), and the larger model weights download on first use. No recording upload
+is required. Multiple imports are processed sequentially so the larger model does not exhaust
+local memory.
 The core dependencies are pinned in `services/audio_worker/requirements-forced.txt`.
 
 Snapshots, raw candidates, and logs live under `services/audio_worker/data/alignment-runs/`.

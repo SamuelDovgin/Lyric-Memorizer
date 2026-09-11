@@ -1,4 +1,4 @@
-import { AlignmentOptions, type AlignmentChoice } from "../components/AlignmentOptions";
+import { AlignmentOptions } from "../components/AlignmentOptions";
 import { useFloatingLyrics } from "../hooks/useFloatingLyrics";
 import { useListeningMediaSession } from "../hooks/useListeningMediaSession";
 import { browserMode } from "../lib/browserLibrary";
@@ -30,6 +30,8 @@ export function PlayerPage({song, minimized, onLibrary, onExpand, onUpdate, onDe
   const sections = useMemo(() => getSections(song), [song]);
   const timingReview = song.lines.filter(line => !line.verified && line.timingQuality === "needs_review").length;
   const missingTiming = song.lines.filter(line => !usable(line)).length;
+  const processingPercent = Math.round(Math.max(0, Math.min(1, song.processingProgress ?? 0)) * 100);
+  const processingMessage = song.processingMessage || song.statusMessage || "Waiting to start";
   const eligible = useMemo(() => sections.filter(s => s.lineIds.every(id => {const line = song.lines.find(l => l.id === id); return line && usable(line); })), [sections, song]);
   const [loopId, setLoopId] = useState<string | null>(null);
   const [practiceRange, setPracticeRange] = useState<[number, number] | null>(null);
@@ -63,7 +65,6 @@ export function PlayerPage({song, minimized, onLibrary, onExpand, onUpdate, onDe
   const visiblePins = useMemo(() => showEmojis ? pinsAtDensity(emojiCandidates, emojiDensity) : [], [emojiCandidates, emojiDensity, showEmojis]);
   const [notice, setNotice] = useState("");
   const [geniusUrl, setGeniusUrl] = useState("");
-  const [alignmentChoice, setAlignmentChoice] = useState<AlignmentChoice>({engine: song?.alignmentRun?.engine === "forced" ? "forced" : "legacy", language: song?.alignmentRun?.engineConfiguration?.language ?? "en"});
   const [busy, setBusy] = useState(false);
   const stage = useRef<HTMLDivElement>(null);
   const root = useRef<HTMLDivElement>(null);
@@ -211,6 +212,11 @@ export function PlayerPage({song, minimized, onLibrary, onExpand, onUpdate, onDe
       <button className="icon-button" aria-label="Settings" onClick={() => setDrawer("settings")}><Settings2 size={20}/></button>
       <button className="icon-button" aria-label="Fullscreen" onClick={() => void (document.fullscreenElement ? document.exitFullscreen() : root.current?.requestFullscreen())?.catch(() => setNotice("Fullscreen unavailable."))}><Maximize size={19}/></button>
     </header>
+    {song.status === "PROCESSING" && <div className="player-processing" role="status">
+      <div><strong>Preparing synchronized lyrics · {processingPercent}%</strong><span>{processingMessage}</span></div>
+      <i><b style={{width: `${Math.max(3, processingPercent)}%`}} /></i>
+      <small>You can listen now. Timing updates here as the local Whisper job progresses.</small>
+    </div>}
     <div className="listening-content">{map}<main className="listening-center">
       <div className="stage-heading">{floatingButton}<span>{currentSection?.name ?? "YOUR LYRICS"}</span><button className="subtle-button" onClick={() => setDrawer("timing")}><Clock3 size={14}/> Timing</button></div>
       {timingReview > 0 && <p className="timing-coverage" role="status">{timingReview} lines need a listening check. Previous timing may still be used. <button className="subtle-button" onClick={() => setDrawer("timing")}>Review flagged lines</button></p>}
@@ -273,7 +279,7 @@ export function PlayerPage({song, minimized, onLibrary, onExpand, onUpdate, onDe
         <button className="button secondary" disabled={busy} onClick={async () => {setBusy(true); try {onUpdate(await api.geniusSections(song.id, {url: geniusUrl, title: song.title, artist: song.artist, revision: song.alignmentRevision ?? 0})); setNotice("Genius section headings applied.");} catch(e) {setNotice(String(e));} finally {setBusy(false);}}}>{busy ? "Matching sections…" : "Get Genius sections"}</button>
         <small>Paste a song link, or leave it blank to search Genius by title and artist. No API token is required.</small>
         <p role="status">{notice}</p>
-        <AlignmentOptions value={alignmentChoice} onChange={setAlignmentChoice} disabled={busy}/><button className="button secondary" disabled={busy} onClick={async () => {setBusy(true); try {const {jobId} = await api.startAlignment(song.id, false, alignmentChoice); let job; do {await new Promise(r => setTimeout(r, 1000)); job = await api.job(jobId);} while (job.status !== "COMPLETE" && job.status !== "FAILED"); if(job.status === "FAILED") throw new Error(job.message); const updated = await api.song(song.id); onUpdate(updated); setNotice(job.message || updated.statusMessage);} catch(e) {setNotice(String(e));} finally {setBusy(false);}}}>Redo line timing</button></>}
+        <AlignmentOptions/><button className="button secondary" disabled={busy} onClick={async () => {setBusy(true); try {const {jobId} = await api.startAlignment(song.id, false); let job; do {await new Promise(r => setTimeout(r, 1000)); job = await api.job(jobId); setNotice(job.status === "COMPLETE" ? job.message : `${Math.round(Math.max(0, Math.min(1, job.progress)) * 100)}% · ${job.message}`);} while (job.status !== "COMPLETE" && job.status !== "FAILED"); if(job.status === "FAILED") throw new Error(job.message); const updated = await api.song(song.id); onUpdate(updated); setNotice(job.message || updated.statusMessage);} catch(e) {setNotice(String(e));} finally {setBusy(false);}}}>Redo line timing</button></>}
         <button className="danger-link" onClick={async () => {if (!confirm(`Remove “${song.title}” from this device?`)) return; try {await api.deleteSong(song.id); transport.pause(); onDelete();} catch(e) {setNotice(String(e));}}}>Remove song</button>
       </div>}
     </Drawer>}

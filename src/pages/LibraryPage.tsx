@@ -110,6 +110,8 @@ export function LibraryPage({
           {songs.map((song, index) => {
             const practice = savedPractice(song);
             const position = readLocal<number>(`listening.position.${song.id}`, 0);
+            const processing = song.status === "PROCESSING";
+            const processingPercent = Math.round(Math.max(0, Math.min(1, song.processingProgress ?? 0)) * 100);
 
             return (
               <article className="song-card" key={song.id}>
@@ -122,7 +124,7 @@ export function LibraryPage({
                   </span>
                   <span className="song-copy">
                     <span className="library-song-status">
-                      {song.status === "PROCESSING" ? "Timing in background" : playable(song) ? "Ready to play" : "Preparing audio"}
+                      {processing ? `Preparing timing · ${processingPercent}%` : playable(song) ? "Ready to play" : "Preparing audio"}
 
                     </span>
                     <strong>{song.title}</strong>
@@ -130,6 +132,10 @@ export function LibraryPage({
                       {song.artist || "Your recording"} ·{" "}
                       {formatTime(song.duration)}
                     </span>
+                    {processing && <span className="library-progress" role="status" aria-label={`${processingPercent}% timing progress`}>
+                      <i><b style={{width: `${Math.max(3, processingPercent)}%`}} /></i>
+                      <small>{song.processingMessage || song.statusMessage || "Waiting to start"}</small>
+                    </span>}
                   </span>
                   <ArrowRight size={20} className="card-arrow" />
                 </button>

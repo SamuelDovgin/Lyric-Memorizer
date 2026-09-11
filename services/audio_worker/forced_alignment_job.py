@@ -39,7 +39,11 @@ def execute_forced_alignment(song, paths, run_id, data_dir, progress, language='
                 except ValueError:
                     continue
                 if isinstance(event, dict) and isinstance(event.get('message'), str):
-                    progress(event['message'])
+                    fraction = event.get('progress')
+                    if isinstance(fraction, (int, float)):
+                        progress(float(fraction), event['message'])
+                    else:
+                        progress(event['message'])
             code = process.wait()
         except BaseException:
             process.terminate()

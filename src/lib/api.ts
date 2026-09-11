@@ -9,6 +9,7 @@ import type {
   SavedSession,
   BeatMap,
   SectionOccurrence,
+  JobStatus,
 } from "../types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -81,13 +82,13 @@ export const api = {
       body,
     });
   },
-  startAlignment: (songId: string, refineWords = false, options?: {engine: "forced" | "legacy"; language: string}) =>
+  startAlignment: (songId: string, refineWords = false) =>
     request<{ jobId: string }>(
-      `/api/songs/${songId}/align?refine_words=${refineWords}${options ? `&engine=${options.engine}&language=${encodeURIComponent(options.language)}` : ""}`,
+      `/api/songs/${songId}/align?refine_words=${refineWords}`,
       { method: "POST" },
     ),
   job: (jobId: string) =>
-    request<{ status: string; progress: number; message: string; engine?: string; outcome?: "applied" | "partial" | "unchanged" | "failed" }>(
+    request<JobStatus>(
       `/api/jobs/${jobId}`,
     ),
   restoreAlignment: (songId: string, revision: number) => request<Song>(`/api/songs/${songId}/alignment/restore?revision=${revision}`, {method: "POST"}),

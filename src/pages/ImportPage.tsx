@@ -1,4 +1,4 @@
-import { AlignmentOptions, type AlignmentChoice } from "../components/AlignmentOptions";
+import { AlignmentOptions } from "../components/AlignmentOptions";
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import {
   ArrowLeft,
@@ -15,6 +15,17 @@ import {
 import { browserMode } from "../lib/browserLibrary";
 import { api } from "../lib/api";
 import type { LyricSyncPreview, Song, YoutubeDownload } from "../types";
+
+type BatchEntryStatus = "pending" | "importing" | "imported" | "failed";
+
+interface BatchImportEntry {
+  id: string;
+  file: File;
+  title: string;
+  lyrics: string;
+  status: BatchEntryStatus;
+  error?: string;
+}
 
 interface Props {
   song?: Song;
@@ -44,18 +55,22 @@ export function ImportPage({ song, onCancel, onImported, onUpdate, onNavigationS
   const [downloadBusy, setDownloadBusy] = useState(false);
   const downloadRunRef = useRef(0);
   const [original, setOriginal] = useState<File>();
+  const [batchEntries, setBatchEntries] = useState<BatchImportEntry[]>([]);
+  const [batchBusy, setBatchBusy] = useState(false);
   const [vocals, setVocals] = useState<File>();
   const [instrumental, setInstrumental] = useState<File>();
   const [syncPreview, setSyncPreview] = useState<LyricSyncPreview | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [importFormVersion, setImportFormVersion] = useState(0);
-  const [alignmentChoice, setAlignmentChoice] = useState<AlignmentChoice>({engine: song?.alignmentRun?.engine === "forced" ? "forced" : "legacy", language: song?.alignmentRun?.engineConfiguration?.language ?? "en"});
   const [error, setError] = useState<string | null>(null);
 
-  const working = busy || downloadBusy || syncBusy || geniusBusy;
+  const batchMode = !editing && batchEntries.length > 1;
+  const working = busy || batchBusy || downloadBusy || syncBusy || geniusBusy;
   const dirty = editing ? title !== saved?.title || artist !== saved?.artist || lyrics !== saved?.lyrics
-    : Boolean(title || artist || lyrics || youtubeUrl || original || vocals || instrumental);
+    : batchMode
+      ? Boolean(artist || batchEntries.some((entry) => entry.status !== "imported" || entry.title || entry.lyrics))
+      : Boolean(title || artist || lyrics || youtubeUrl || original || vocals || instrumental);
   useEffect(() => { onNavigationState?.({dirty, busy: working}); }, [dirty, working, onNavigationState]);
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => { if (dirty || working) { event.preventDefault(); event.returnValue = ''; } };
@@ -70,9 +85,97 @@ export function ImportPage({ song, onCancel, onImported, onUpdate, onNavigationS
     [],
   );
 
+  const clearBatch = () => {
+    setOriginal(undefined);
+    setBatchEntries([]);
+    setImportFormVersion((version) => version + 1);
+  };
+
+  const batchTitle = (file: File, index: number) => {
+    const withoutExtension = file.name.replace(/\.[^.]+$/, "").trim();
+    const cleaned = withoutExtension.replace(/[._-]+/g, " ").replace(/\s+/g, " ").trim();
+    return cleaned || `Song ${index + 1}`;
+  };
+
+  const selectOriginalFiles = (files: File[]) => {
+    const first = files[0];
+    setSyncPreview(null);
+    setError(null);
+    setOriginal(first);
+    setYoutubeUrl("");
+    setYoutubeDownload(null);
+    if (files.length > 1) {
+      setBatchEntries(files.map((file, index) => ({
+        id: `${file.name}-${file.lastModified}-${index}`,
+        file,
+        title: batchTitle(file, index),
+        lyrics: "",
+        status: "pending",
+      })));
+      setTitle("");
+      setLyrics("");
+    } else {
+      setBatchEntries([]);
+    }
+  };
+
+  const updateBatchEntry = (id: string, patch: Partial<BatchImportEntry>) => {
+    setBatchEntries((entries) => entries.map((entry) => entry.id === id ? {...entry, ...patch} : entry));
+  };
+
+  const submitBatch = async () => {
+    const pending = batchEntries.filter((entry) => entry.status !== "imported");
+    const invalid = pending.find((entry) => !entry.title.trim() || !entry.lyrics.trim());
+    if (invalid) {
+      setError(`Add a title and exact lyrics for “${invalid.file.name}” before importing.`);
+      return;
+    }
+    if (!pending.length) {
+      setError("Select more audio files to start another batch.");
+      return;
+    }
+
+    setBatchBusy(true);
+    setError(null);
+    let importedCount = 0;
+    let failedCount = 0;
+    for (const entry of pending) {
+      updateBatchEntry(entry.id, {status: "importing", error: undefined});
+      try {
+        const imported = await api.importSong({
+          title: entry.title.trim(),
+          artist,
+          lyrics: entry.lyrics,
+          original: entry.file,
+        });
+        importedCount += 1;
+        updateBatchEntry(entry.id, {status: "imported"});
+        onImported(imported, true);
+      } catch (caught) {
+        failedCount += 1;
+        updateBatchEntry(entry.id, {
+          status: "failed",
+          error: caught instanceof Error ? caught.message : "Import failed",
+        });
+      }
+    }
+    setBatchBusy(false);
+    if (failedCount) {
+      setMessage(`Imported ${importedCount} of ${pending.length}. Fix the failed files below and try again.`);
+    } else {
+      setMessage(`Imported ${importedCount} songs. Whisper alignment is running in the background; progress appears in your library.`);
+      setArtist("");
+      clearBatch();
+    }
+  };
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setError(null);
+    if (batchMode) {
+      await submitBatch();
+      return;
+    }
     if (downloadBusy)
       return setError(
         "Wait for the YouTube download to finish before importing.",
@@ -92,14 +195,14 @@ export function ImportPage({ song, onCancel, onImported, onUpdate, onNavigationS
         setSaved(updated); onUpdate?.(updated); setMessage("Changes saved.");
         if (redo) {
           setMessage("Changes saved. Preparing lyric timing…");
-          const {jobId} = await api.startAlignment(saved.id, false, alignmentChoice);
+          const {jobId} = await api.startAlignment(saved.id, false);
           while (true) {
             const job = await api.job(jobId);
             if (job.status === 'FAILED') {
               setMessage('');
               throw new Error(`Edits saved, but timing could not be updated: ${job.message}`);
             }
-            setMessage(job.message);
+            setMessage(job.status === "COMPLETE" ? job.message : formatJobProgress(job));
             if (job.status === 'COMPLETE') {
               updated = await api.song(saved.id); setSaved(updated); onUpdate?.(updated); break;
             }
@@ -138,7 +241,7 @@ export function ImportPage({ song, onCancel, onImported, onUpdate, onNavigationS
         setSyncPreview(null);
         setMode("original");
         setImportFormVersion((version) => version + 1);
-        setMessage(`${song.title} imported. Timing is running in the background—add another song whenever you’re ready.`);
+        setMessage(`${song.title} imported. Whisper alignment is running in the background; the library shows its live percentage. Add another song whenever you’re ready.`);
         setBusy(false);
       }
     } catch (caught) {
@@ -292,6 +395,7 @@ export function ImportPage({ song, onCancel, onImported, onUpdate, onNavigationS
                 setSyncPreview(null);
                 setMode("stems");
                 setOriginal(undefined);
+                setBatchEntries([]);
                 setYoutubeUrl("");
                 setYoutubeDownload(null);
               }}
@@ -304,18 +408,40 @@ export function ImportPage({ song, onCancel, onImported, onUpdate, onNavigationS
               <FileDrop
                 key={`original-${importFormVersion}`}
                 label="Original audio"
-                detail="Play the original; stems are optional"
+                detail="Play the original; select several files for a batch"
                 file={original}
-                onFile={(file) => {
-                  setSyncPreview(null);
-                  setOriginal(file);
-                  setError(null);
-                  if (file) {
-                    setYoutubeUrl("");
-                    setYoutubeDownload(null);
-                  }
-                }}
+                files={batchEntries.map((entry) => entry.file)}
+                multiple
+                onFiles={selectOriginalFiles}
               />
+              {batchMode && <section className="batch-import-panel" aria-label="Batch import">
+                <div className="batch-import-heading">
+                  <div>
+                    <small>Batch import</small>
+                    <b>{batchEntries.length} recordings selected</b>
+                  </div>
+                  <button type="button" className="button secondary" onClick={clearBatch}>Clear selection</button>
+                </div>
+                <p>Give each recording its own title and exact lyrics. The shared artist field below is reused for every song. Each import starts Whisper timing in the background.</p>
+                <div className="batch-import-list">
+                  {batchEntries.map((entry) => <article className={`batch-import-entry batch-${entry.status}`} key={entry.id}>
+                    <div className="batch-entry-file">
+                      <FileAudio size={17} />
+                      <span><b>{entry.file.name}</b><small>{(entry.file.size / 1_000_000).toFixed(1)} MB</small></span>
+                      <strong>{entry.status === "importing" ? "Importing…" : entry.status === "imported" ? "Imported" : entry.status === "failed" ? "Needs attention" : "Ready"}</strong>
+                    </div>
+                    <label>
+                      <span>Song title</span>
+                      <input required value={entry.title} disabled={entry.status === "importing" || entry.status === "imported"} onChange={(event) => updateBatchEntry(entry.id, {title: event.target.value})} />
+                    </label>
+                    <label className="batch-entry-lyrics">
+                      <span>Exact lyrics</span>
+                      <textarea required value={entry.lyrics} disabled={entry.status === "importing" || entry.status === "imported"} onChange={(event) => updateBatchEntry(entry.id, {lyrics: event.target.value})} placeholder="Paste the lyrics for this recording" />
+                    </label>
+                    {entry.error && <p className="form-error" role="alert">{entry.error}</p>}
+                  </article>)}
+                </div>
+              </section>}
               <div className="source-divider">
                 <span>or paste a link</span>
               </div>
@@ -424,7 +550,7 @@ export function ImportPage({ song, onCancel, onImported, onUpdate, onNavigationS
         </fieldset>
         )}
 
-        <h2>Song details</h2>
+        {!batchMode && <><h2>Song details</h2>
         <div className="field-grid">
           <label>
             <span>Song title</span>
@@ -451,10 +577,18 @@ export function ImportPage({ song, onCancel, onImported, onUpdate, onNavigationS
               placeholder="Artist or production"
             />
           </label>
-        </div>
+        </div></>}
 
-        {editing && !browserMode && <AlignmentOptions value={alignmentChoice} onChange={setAlignmentChoice} disabled={working}/>}
-        <section
+        {batchMode && <section className="batch-shared-details">
+          <h2>Shared song details</h2>
+          <label>
+            <span>Artist for all songs <small>optional</small></span>
+            <input value={artist} onChange={(event) => setArtist(event.target.value)} placeholder="Artist or production" />
+          </label>
+        </section>}
+
+        {editing && !browserMode && <AlignmentOptions />}
+        {!batchMode && <section
           className="timing-source-card"
           aria-label="Lyric timing source"
         >
@@ -498,9 +632,9 @@ export function ImportPage({ song, onCancel, onImported, onUpdate, onNavigationS
               </span>
             )}
           </div>
-        </section>
+        </section>}
 
-        <details className="genius-import">
+        {!batchMode && <details className="genius-import">
           <summary>Alternative lyric source · Genius</summary>
 
           <p>Bring in verse and chorus labels, then use LRCLIB above to find their timing.</p>
@@ -511,12 +645,12 @@ export function ImportPage({ song, onCancel, onImported, onUpdate, onNavigationS
             catch(e) {setError(String(e));} finally {setGeniusBusy(false);}
           }}>{geniusBusy ? "Fetching Genius…" : "Get Genius lyrics"}</button>
           <small>Title and artist are enough—no URL, pasted lyrics, or access token needed. LyricsGenius fetches the lyrics and headings. Fetching replaces the lyrics in this form.</small>
-        </details>
-        {geniusMessage && <p role="status">{geniusMessage}</p>}
+        </details>}
+        {!batchMode && geniusMessage && <p role="status">{geniusMessage}</p>}
 
 
 
-        <label className="lyrics-field">
+        {!batchMode && <label className="lyrics-field">
           <span>Exact lyrics</span>
           <textarea
             required
@@ -529,12 +663,12 @@ export function ImportPage({ song, onCancel, onImported, onUpdate, onNavigationS
               "Downloaded songs fill this automatically when LRCLIB has lyrics.\n\nOr paste:\n[Verse 1]\nFirst performed line…"
             }
           />
-        </label>
-        <p className="field-note">
+        </label>}
+        {!batchMode && <p className="field-note">
           Plain lyrics and Genius-style Markdown links are accepted. Link URLs,
           trailing backslashes, and “You might also like” recommendations are
           removed automatically.
-        </p>
+        </p>}
 
         {editing && lyrics !== saved?.lyrics && <p className="field-note" role="status">Changed lyrics reset the old line timings. Save & redo timings to compare the new lyrics with your recording.</p>}
         </fieldset>
@@ -546,11 +680,11 @@ export function ImportPage({ song, onCancel, onImported, onUpdate, onNavigationS
         )}
         <div className="form-actions">
           <span>
-            {working ? <><LoaderCircle className="spin" size={15} /> Working…</> : dirty ? "Unsaved changes" : editing ? "All changes saved" : "Ready when you are"}
+            {working ? <><LoaderCircle className="spin" size={15} /> {batchBusy ? "Importing selected songs…" : message || "Working…"}</> : dirty ? "Unsaved changes" : editing ? "All changes saved" : "Ready when you are"}
           </span>
           <button
             className="button primary"
-            disabled={working || browserMode || !title.trim() || !lyrics.trim()}
+            disabled={working || browserMode || (batchMode ? false : !title.trim() || !lyrics.trim())}
             type="submit"
           >
             {busy ? (
@@ -558,11 +692,11 @@ export function ImportPage({ song, onCancel, onImported, onUpdate, onNavigationS
             ) : (
               <Upload size={18} />
             )}
-            {busy ? (editing ? "Saving…" : "Importing…") : editing ? "Save changes" : "Import song"}
+            {busy ? (editing ? "Saving…" : "Importing…") : editing ? "Save changes" : batchMode ? "Import all songs" : "Import song"}
           </button>
           {editing && <button type="submit" value="timing" className="button secondary"
             disabled={working || browserMode || !title.trim() || !lyrics.trim() || !song?.originalUrl}>Save & redo timings</button>}
-          {!editing && <button type="submit" value="another" className="button secondary"
+          {!editing && !batchMode && <button type="submit" value="another" className="button secondary"
             disabled={working || browserMode || !title.trim() || !lyrics.trim()}>Import & add another</button>}
         </div>
       </form>
@@ -577,34 +711,51 @@ function formatDuration(seconds: number) {
     .padStart(2, "0")}`;
 }
 
+function formatJobProgress(job: {progress: number; message: string}) {
+  const percent = Math.round(Math.max(0, Math.min(1, job.progress)) * 100);
+  return `${percent}% · ${job.message || "Preparing lyric timing"}`;
+}
+
 function FileDrop({
   label,
   detail,
   file,
+  files,
+  multiple = false,
   onFile,
+  onFiles,
 }: {
   label: string;
   detail: string;
   file?: File;
-  onFile: (file?: File) => void;
+  files?: File[];
+  multiple?: boolean;
+  onFile?: (file?: File) => void;
+  onFiles?: (files: File[]) => void;
 }) {
   const inputId = useId();
+  const selectedFiles = files ?? (file ? [file] : []);
   return (
-    <label htmlFor={inputId} className={`file-drop ${file ? "has-file" : ""}`}>
+    <label htmlFor={inputId} className={`file-drop ${selectedFiles.length ? "has-file" : ""}`}>
       <input
         id={inputId}
         type="file"
         accept="audio/*"
+        multiple={multiple}
         aria-label={label}
-        onChange={(event) => onFile(event.target.files?.[0])}
+        onChange={(event) => {
+          const selected = Array.from(event.target.files ?? []);
+          if (multiple) onFiles?.(selected);
+          else onFile?.(selected[0]);
+        }}
       />
       <span className="file-icon">
-        {file ? <Check size={19} /> : <FileAudio size={19} />}
+        {selectedFiles.length ? <Check size={19} /> : <FileAudio size={19} />}
       </span>
       <span>
-        <b>{file?.name ?? label}</b>
+        <b>{selectedFiles.length > 1 ? `${selectedFiles.length} audio files selected` : selectedFiles[0]?.name ?? label}</b>
         <small>
-          {file ? `${(file.size / 1_000_000).toFixed(1)} MB` : detail}
+          {selectedFiles.length > 1 ? "Each file gets its own title and lyrics below" : selectedFiles[0] ? `${(selectedFiles[0].size / 1_000_000).toFixed(1)} MB` : detail}
         </small>
       </span>
     </label>

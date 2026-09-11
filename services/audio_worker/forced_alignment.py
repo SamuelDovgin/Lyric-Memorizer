@@ -16,8 +16,10 @@ from statistics import mean, median
 
 from .alignment_windows import alignment_text, plan_passages, reference_kind, valid_bounds
 
-ENGINE_VERSION = 'forced-v3'
-DEFAULT_MODEL = 'large-v3-turbo'
+ENGINE_VERSION = 'forced-v4'
+# Prefer the full model for alignment quality. Set LYRIC_FORCED_MODEL to
+# large-v3-turbo when a faster, lower-memory run is more important.
+DEFAULT_MODEL = 'large-v3'
 DEFAULT_DEVICE = 'auto'
 
 
@@ -128,6 +130,14 @@ class StableAdapter:
         return result.to_dict()['segments'] if result else []
 
 
+def _report_progress(progress, fraction: float, message: str) -> None:
+    """Report numeric progress while keeping older one-argument test hooks valid."""
+    try:
+        progress(max(0.0, min(0.98, fraction)), message)
+    except TypeError:
+        progress(message)
+
+
 def run_alignment(song: dict, paths: dict, config: dict, cache_dir: Path, adapter, progress=lambda message: None) -> dict:
     started = time.monotonic()
     lines = song['lines']
@@ -164,7 +174,7 @@ def run_alignment(song: dict, paths: dict, config: dict, cache_dir: Path, adapte
             line.update(line['planningReference'])
     windows = plan_passages(planning_lines, duration)
     if not windows:
-        progress('No reference timestamps: finding ordered passages from the known lyrics…')
+        _report_progress(progress, .14, 'No reference timestamps: finding ordered passages from the known lyrics…')
         coarse = infer(list(range(len(lines))), 0, duration, original)
         for i, estimate in coarse.items():
             if not estimate['reasons']:
@@ -172,16 +182,18 @@ def run_alignment(song: dict, paths: dict, config: dict, cache_dir: Path, adapte
         windows = plan_passages(planning_lines, duration)
         if not windows:
             raise ValueError('The coarse audio alignment found no supported passage boundaries. Add a few recording-verified reference starts.')
+        _report_progress(progress, .24, f'Found {len(windows)} lyric passage(s) to align.')
     observations = {i: [] for i in range(len(lines))}
     owned = {}
     for number, window in enumerate(windows):
-        progress(f'Aligning passage {number + 1} of {len(windows)}…')
+        passage_fraction = .24 + .64 * (number + 1) / max(1, len(windows))
+        _report_progress(progress, passage_fraction, f'Aligning passage {number + 1} of {len(windows)}…')
         estimates = infer(window.context_indices, window.start, window.end, original)
         for i, e in estimates.items():
             if not e['reasons']:
                 observations[i].append(e['start'])
         if any(estimates[i]['reasons'] for i in window.owner_indices if not lines[i].get('verified')):
-            progress(f'Rechecking uncertain lines in passage {number + 1} of {len(windows)}…')
+            _report_progress(progress, min(.9, passage_fraction + .025), f'Rechecking uncertain lines in passage {number + 1} of {len(windows)}…')
             # Two bounded alternatives: wider original context, then an existing stem.
             first, last = window.owner_indices[0], window.owner_indices[-1]
             # Isolate the owning section too: neighboring repetitions can steal
@@ -205,7 +217,7 @@ def run_alignment(song: dict, paths: dict, config: dict, cache_dir: Path, adapte
                     break
         if config.get('retryModel') and any(estimates[i]['reasons'] for i in window.owner_indices if not lines[i].get('verified')):
             if larger_adapter is None:
-                progress('Loading optional larger model for uncertain passages…')
+                _report_progress(progress, .9, 'Loading optional larger model for uncertain passages…')
                 larger_adapter = StableAdapter(config['retryModel'], config['language'], config.get('device', DEFAULT_DEVICE))
             retry = infer(window.context_indices, window.start, window.end, original, larger_adapter, config['retryModel'])
             for i in window.owner_indices:
@@ -213,6 +225,7 @@ def run_alignment(song: dict, paths: dict, config: dict, cache_dir: Path, adapte
                     estimates[i] = {**retry[i], 'retryModel': config['retryModel']}
         for i in window.owner_indices:
             owned[i] = {**estimates[i], 'passageId': window.id}
+    _report_progress(progress, .94, 'Checking accepted lyric boundaries and review flags…')
     result = deepcopy(lines)
     supported, revised, recovered = 0, 0, 0
     for i, old in enumerate(lines):

@@ -128,6 +128,21 @@ export class ListeningTransport {
       this.emit({position: target, status: 'paused'});
     }
   }
+  seekBy(offset: number) {
+    if (!Number.isFinite(offset)) return;
+    const plan = this.plan;
+    const end = plan ? Math.min(plan.exit, this.state.duration || plan.exit) : 0;
+    const length = plan ? end - plan.start : 0;
+    if (!plan || length <= 0) {
+      this.seek(this.state.position + offset);
+      return;
+    }
+    const current = this.state.position >= plan.start && this.state.position < end
+      ? this.state.position
+      : plan.start;
+    const wrapped = ((current - plan.start + offset) % length + length) % length;
+    this.seek(plan.start + wrapped);
+  }
   setTransition(plan: Transition | null) {
     if (plan && (plan.gap !== 0 || plan.clicks.length)) throw new Error('Listening practice supports continuous repeats.');
     const previousKey = this.desiredKey();

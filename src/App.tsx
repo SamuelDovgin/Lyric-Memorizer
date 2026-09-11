@@ -67,9 +67,18 @@ export function App() {
     if (!processingIds) return;
     const refreshProcessing = () => {
       for (const id of processingIds.split(",")) {
-        void api.song(id).then((song) => {
-          setSongs((latest) => latest.map((item) => item.id === song.id ? song : item));
-          setCurrent((latest) => latest?.id === song.id ? song : latest);
+        void api.song(id).then(async (song) => {
+          const job = song.jobId ? await api.job(song.jobId).catch(() => null) : null;
+          const visibleSong = job && song.status === "PROCESSING"
+            ? {
+                ...song,
+                processingProgress: Math.max(0, Math.min(1, job.progress)),
+                processingMessage: job.message,
+                processingJobKind: job.kind,
+              }
+            : song;
+          setSongs((latest) => latest.map((item) => item.id === song.id ? visibleSong : item));
+          setCurrent((latest) => latest?.id === song.id ? visibleSong : latest);
         }).catch(() => {});
       }
     };

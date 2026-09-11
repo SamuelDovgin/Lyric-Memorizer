@@ -31,9 +31,9 @@ def saved_song(tmp_path, monkeypatch):
     return deepcopy(song)
 
 
-def run_job():
+def run_job(engine='legacy'):
     with TestClient(worker.app) as client:
-        response = client.post('/api/songs/fallback/align')
+        response = client.post(f'/api/songs/fallback/align?engine={engine}')
         assert response.status_code == 202
         return database.get_job(response.json()['jobId'])
 

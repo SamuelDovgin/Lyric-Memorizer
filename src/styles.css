@@ -2638,8 +2638,50 @@ button {
 .timing-coverage { display: flex; align-items: center; flex-wrap: wrap; gap: .65rem; padding: .6rem 1rem; color: var(--muted); font-size: .85rem; }
 .line-timing-needed { display: block; font-size: .75rem; font-weight: 400; opacity: .65; }
 
+.batch-import-panel { display: grid; gap: 14px; padding: 16px; border: 1px solid #cfe0d5; border-radius: 14px; background: #f5faf6; }
+.batch-import-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.batch-import-heading > div { display: grid; gap: 3px; }
+.batch-import-heading small { color: var(--green); font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.batch-import-heading b { font-size: 15px; }
+.batch-import-panel > p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.batch-import-list { display: grid; gap: 12px; }
+.batch-import-entry { display: grid; gap: 10px; padding: 13px; border: 1px solid #d9e3dc; border-radius: 11px; background: white; }
+.batch-import-entry.batch-imported { border-color: #a9c7b9; background: #f1f8f3; }
+.batch-import-entry.batch-failed { border-color: #e1b4ad; background: #fff7f5; }
+.batch-entry-file { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; color: var(--green); }
+.batch-entry-file > span { min-width: 0; display: grid; gap: 2px; }
+.batch-entry-file b { overflow: hidden; color: var(--ink); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.batch-entry-file small { color: var(--muted); font-size: 10px; }
+.batch-entry-file strong { color: var(--muted); font-size: 10px; white-space: nowrap; }
+.batch-import-entry.batch-imported .batch-entry-file strong { color: var(--green); }
+.batch-import-entry.batch-failed .batch-entry-file strong { color: #9b4238; }
+.batch-entry-lyrics textarea { min-height: 120px; }
+.batch-import-entry .form-error { margin: 0; }
+.batch-shared-details { display: grid; gap: 10px; }
+.batch-shared-details h2 { margin-bottom: 0 !important; }
+.library-progress { display: grid !important; gap: 4px; margin-top: 8px; }
+.library-progress i { display: block; height: 5px; overflow: hidden; border-radius: 4px; background: #e0e6df; }
+.library-progress i b { display: block; height: 100%; border-radius: inherit; background: #b28a42; transition: width .3s ease; }
+.library-progress small { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.player-processing { display: grid; grid-template-columns: minmax(0, 1fr) minmax(160px, 34%); align-items: center; gap: 8px 18px; padding: 12px 24px; border-bottom: 1px solid #e0c896; background: #fff7e7; color: #6f572d; }
+.player-processing > div { display: grid; gap: 3px; min-width: 0; }
+.player-processing strong { font-size: 13px; }
+.player-processing span { overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.player-processing > i { display: block; height: 7px; overflow: hidden; border-radius: 7px; background: #ead9b6; }
+.player-processing > i b { display: block; height: 100%; border-radius: inherit; background: #b28a42; transition: width .3s ease; }
+.player-processing > small { grid-column: 1 / -1; color: var(--muted); font-size: 10px; }
+@media (max-width: 600px) {
+  .batch-import-heading { align-items: flex-start; flex-direction: column; }
+  .batch-import-heading .button { width: 100%; justify-content: center; }
+  .batch-entry-file { grid-template-columns: auto minmax(0, 1fr); }
+  .batch-entry-file strong { grid-column: 2; }
+  .player-processing { grid-template-columns: 1fr; padding: 12px 14px; }
+  .player-processing > small { grid-column: auto; }
+}
+
 .alignment-options { display: grid; gap: .65rem; margin: 1rem 0; }
-.alignment-options label { display: grid; gap: .35rem; }
+.alignment-options small { color: var(--green); font-size: .72rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.alignment-options b { font-size: .98rem; }
 .alignment-options p { font-size: .85rem; opacity: .8; }
 
 /* Keep floating lyrics reachable in both the song and library views. */

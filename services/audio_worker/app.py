@@ -605,7 +605,7 @@ def align_song(song_id: str, job_id: str, refine_words: bool = False, engine: st
                message="Checking synchronized lyrics", updatedAt=now_iso())
     save_job(job)
     try:
-        selected_engine = engine or os.environ.get("LYRIC_ALIGNMENT_ENGINE", "legacy")
+        selected_engine = engine or os.environ.get("LYRIC_ALIGNMENT_ENGINE", "forced")
         if selected_engine not in ("forced", "legacy"):
             raise ValueError("Unknown alignment engine")
         job["engine"] = selected_engine
@@ -619,8 +619,16 @@ def align_song(song_id: str, job_id: str, refine_words: bool = False, engine: st
                            updatedAt=now_iso())
                 save_job(job)
             try:
-                def forced_progress(message):
-                    job.update(message=message, engine="forced", updatedAt=now_iso())
+                def forced_progress(fraction_or_message, message=None):
+                    if message is None:
+                        fraction = None
+                        message = str(fraction_or_message)
+                    else:
+                        fraction = float(fraction_or_message)
+                    updates = {"message": message, "engine": "forced", "updatedAt": now_iso()}
+                    if fraction is not None:
+                        updates["progress"] = max(.1, min(.98, fraction))
+                    job.update(**updates)
                     save_job(job)
                 forced_progress("Preparing recording and reference points…")
                 result = execute_forced_alignment(document, paths, job_id, database.DATA_DIR, forced_progress, language)
@@ -647,14 +655,26 @@ def align_song(song_id: str, job_id: str, refine_words: bool = False, engine: st
         if not refine_words:
             job.update(progress=.15, message="Comparing synchronized candidates with the local recording")
             save_job(job)
-            def timing_progress(message: str) -> None:
-                job.update(message=message, updatedAt=now_iso())
+            def timing_progress(fraction_or_message, message=None) -> None:
+                if message is None:
+                    message = str(fraction_or_message)
+                    if "more accurate" in message.casefold():
+                        fraction = .5
+                    elif "missing lines" in message.casefold():
+                        fraction = .7
+                    else:
+                        fraction = job.get("progress", .15)
+                else:
+                    fraction = float(fraction_or_message)
+                job.update(progress=max(.1, min(.95, fraction)), message=message, updatedAt=now_iso())
                 save_job(job)
             audio_path = paths.get("vocals") or paths.get("original")
             saved_document = deepcopy(document)
             try:
                 if not apply_catalog_timing(document, audio_path, validate_audio=True, on_progress=timing_progress):
                     raise RuntimeError("No reliable catalog timing was available.")
+                job.update(progress=.86, message="Catalog timing checked against the recording", updatedAt=now_iso())
+                save_job(job)
             except Exception as exc:
                 # A failed attempt must not leave partial catalog changes behind.
                 document = saved_document
@@ -668,7 +688,17 @@ def align_song(song_id: str, job_id: str, refine_words: bool = False, engine: st
             model = os.environ.get("LYRIC_WHISPER_MODEL", "small")
             job.update(progress=.3, message="Refining words locally; first use downloads the model")
             save_job(job)
-            hypothesis = transcribe_anchored_vocals(vocals, document["lines"], model) if anchored else transcribe_vocals(vocals, model, prompt=document["lyrics"])
+            if anchored:
+                def word_progress(fraction, message):
+                    job.update(progress=max(.3, min(.95, float(fraction))), message=message, updatedAt=now_iso())
+                    save_job(job)
+                hypothesis = transcribe_anchored_vocals(vocals, document["lines"], model, on_progress=word_progress)
+            else:
+                job.update(progress=.45, message="Listening for lyric words with Whisper", updatedAt=now_iso())
+                save_job(job)
+                hypothesis = transcribe_vocals(vocals, model, prompt=document["lyrics"])
+                job.update(progress=.85, message="Whisper transcription complete; applying word timings", updatedAt=now_iso())
+                save_job(job)
             if not hypothesis:
                 raise RuntimeError("No sung words detected")
             document["lines"] = align_anchored_hypothesis(document["lines"], hypothesis) if anchored else align_hypothesis(document["lines"], hypothesis)
@@ -1059,7 +1089,7 @@ def start_alignment(song_id: str, background_tasks: BackgroundTasks, refine_word
         raise HTTPException(422, "Unsupported alignment language")
     if refine_words and not found[1].get("vocals"):
         raise HTTPException(409, "Create vocal stems before refining words")
-    selected_engine = engine or os.environ.get("LYRIC_ALIGNMENT_ENGINE", "legacy")
+    selected_engine = engine or os.environ.get("LYRIC_ALIGNMENT_ENGINE", "forced")
     job_id = schedule_alignment(song_id, background_tasks, engine=selected_engine, language=language) if not refine_words else None
     if refine_words:
         job_id = f"job_{uuid.uuid4().hex}"

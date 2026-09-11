@@ -25,9 +25,8 @@ it('previews refreshed lyrics without saving and then starts timing after saving
   fireEvent.click(screen.getByText('Pull lyrics from YouTube source'));
   await screen.findByDisplayValue('Fresh words');
   expect(api.editSong).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByLabelText('Timing method'), {target: {value: 'forced'}});
   fireEvent.click(screen.getByText('Save & redo timings'));
-  await waitFor(() => expect(api.startAlignment).toHaveBeenCalledWith('cards', false, {engine: 'forced', language: 'en'}));
+  await waitFor(() => expect(api.startAlignment).toHaveBeenCalledWith('cards', false));
   expect(api.editSong).toHaveBeenCalledWith('cards', {title: 'Cards', artist: 'Doja Cat', lyrics: 'Fresh words', revision: 3});
   await screen.findByText('Timing complete');
   expect(onUpdate).toHaveBeenCalledWith(updated);
@@ -60,5 +59,25 @@ it('keeps the import form open for another song while timing runs in the backgro
   await waitFor(() => expect(onImported).toHaveBeenCalledWith(song, true));
   expect(screen.getByLabelText('Song title')).toHaveValue('');
   expect(screen.getByLabelText('Exact lyrics')).toHaveValue('');
-  expect(screen.getByText(/Timing is running in the background/)).toBeInTheDocument();
+  expect(screen.getByText(/Whisper alignment is running in the background/)).toBeInTheDocument();
+});
+
+it('imports multiple local recordings with per-file lyrics', async () => {
+  vi.mocked(api.importSong).mockResolvedValue(song);
+  const onImported = vi.fn();
+  render(<ImportPage onCancel={vi.fn()} onImported={onImported} />);
+  const first = new File(['audio one'], 'first-song.wav', {type: 'audio/wav'});
+  const second = new File(['audio two'], 'second_song.mp3', {type: 'audio/mpeg'});
+  fireEvent.change(screen.getByLabelText('Original audio'), {target: {files: [first, second]}});
+  expect(screen.getByRole('region', {name: 'Batch import'})).toBeInTheDocument();
+  const lyrics = screen.getAllByLabelText('Exact lyrics');
+  fireEvent.change(lyrics[0], {target: {value: 'First lyrics'}});
+  fireEvent.change(lyrics[1], {target: {value: 'Second lyrics'}});
+  fireEvent.click(screen.getByRole('button', {name: 'Import all songs'}));
+  await waitFor(() => expect(onImported).toHaveBeenCalledTimes(2));
+  expect(onImported).toHaveBeenNthCalledWith(1, song, true);
+  expect(onImported).toHaveBeenNthCalledWith(2, song, true);
+  expect(screen.getByText(/Imported 2 songs/)).toBeInTheDocument();
+  expect(api.importSong).toHaveBeenNthCalledWith(1, expect.objectContaining({title: 'first song', lyrics: 'First lyrics', original: first}));
+  expect(api.importSong).toHaveBeenNthCalledWith(2, expect.objectContaining({title: 'second song', lyrics: 'Second lyrics', original: second}));
 });
